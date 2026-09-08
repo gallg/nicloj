@@ -1,0 +1,20 @@
+;; nicloj -- NIfTI reading and writing in Clojure/Java.
+;;
+;; The project root is the classpath root, so the `nicloj/` source folder is
+;; also the top-level package: `nicloj/core/nifti.clj` is `nicloj.core.nifti`,
+;; `nicloj/header/NiftiHeader.java` is `nicloj.header.NiftiHeader`.
+;; Java modules are compiled ahead of time into `target/classes`.
+{:paths ["." "target/classes"]
+
+ :deps {org.clojure/clojure {:mvn/version "1.12.1"}}
+
+ :aliases
+ {;; clojure -T:build javac    compile the Java modules
+  ;; clojure -T:build clean    remove target/
+  :build {:replace-paths []
+          :replace-deps {io.github.clojure/tools.build {:mvn/version "0.10.9"}}
+          :ns-default build}
+
+  ;; clojure -M:test
+  :test {:extra-paths ["test"]
+         :main-opts ["-m" "test-runner"]}}}
