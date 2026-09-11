@@ -24,13 +24,19 @@
 (defn data-dtype [img] (hdr/data-dtype (header img)))
 
 (defn raw-data
-  "Voxel values exactly as stored, before `scl_slope`/`scl_inter`."
+  "Voxel values exactly as stored, before `scl_slope`/`scl_inter`, and in the
+  file's own type, so an `int16` image costs two bytes a voxel."
   ^NdArray [img]
   (force (:data img)))
 
 (defn fdata
   "Voxel values in real-world units, i.e. raw values with the header's scaling
-  applied. Always doubles."
+  applied.
+
+  Every element reads as a `double`, but the array is only *stored* as doubles
+  when it has to be: without scaling this hands back `raw-data` untouched, in
+  the file's own type. A scaled image widens, since the scaled values are no
+  longer representable in it."
   ^NdArray [img]
   (let [[slope inter] (or (hdr/slope-inter (header img)) [1.0 0.0])]
     (nd/scaled (raw-data img) slope inter)))

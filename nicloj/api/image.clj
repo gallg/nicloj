@@ -58,6 +58,7 @@
 ;; Voxel arrays
 (reexport nd/array nd/zeros nd/value nd/values nd/nested nd/reshape nd/squeeze
           nd/transpose nd/flip nd/slice nd/finite-range
+          [array-dtype nd/dtype]
           [array-shape nd/shape]
           [array-close? nd/close?])
 

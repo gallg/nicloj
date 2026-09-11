@@ -48,15 +48,6 @@ public final class Mat {
         return c;
     }
 
-    public static double[] mulVec(double[][] a, double[] v) {
-        double[] out = new double[a.length];
-        for (int i = 0; i < a.length; i++) {
-            double s = 0;
-            for (int j = 0; j < v.length; j++) s += a[i][j] * v[j];
-            out[i] = s;
-        }
-        return out;
-    }
 
     /** Top-left {@code rows x cols} block. */
     public static double[][] block(double[][] a, int rows, int cols) {

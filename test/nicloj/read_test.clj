@@ -13,7 +13,7 @@
   "Min, max, sum and mean over finite voxels, the way the manifest records them.
   Sums compensated so they stay comparable with numpy's pairwise summation."
   [^NdArray arr]
-  (let [^doubles d (.data arr)
+  (let [^doubles d (.toDoubleArray arr)
         n (alength d)]
     (loop [i 0, mn Double/POSITIVE_INFINITY, mx Double/NEGATIVE_INFINITY
            sum 0.0, err 0.0, count 0]

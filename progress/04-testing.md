@@ -80,7 +80,7 @@ breaks at scale.
 
 | Namespace | Covers |
 | --- | --- |
-| `nicloj.array-test` | Column-major layout, reshape, transpose, flip, slice, concat, the codec in both byte orders for every datatype, rounding and clamping, NaN handling, auto-scaling, error cases |
+| `nicloj.array-test` | Column-major layout, reshape, transpose, flip, slice, concat, the codec in both byte orders for every datatype, rounding and clamping, NaN handling, auto-scaling, error cases, on-disk voxel types surviving decode and every structural operation, the 64-bit round trip, flat in-place access, and the abbreviating repr |
 | `nicloj.affine-test` | Inverse, determinant, SVD reconstruction, polar decomposition, quaternion round trips, qform decomposition including left-handed and sheared affines, `shape_zoom_affine`, all the orientation functions |
 | `nicloj.header-test` | Defaults against the NIfTI reference, purity of the accessors, qform/sform behaviour, scaling and unit fields, the binary round trip in both versions and byte orders, string truncation, extensions, rejection of malformed input and of dimensions too large for NIfTI-1 |
 | `nicloj.read-test` | The manifest comparison, laziness, pair resolution from either half, rejection of unreadable input |

@@ -1,11 +1,12 @@
 # Status
 
-As of the initial implementation plus the bug-fix pass in [07-log.md](07-log.md).
+As of the initial implementation, the bug-fix pass, and the voxel-storage
+pass in [07-log.md](07-log.md).
 
 ## Verified
 
 ```
-clojure -M:test                     80 tests, 3789 assertions, 0 failures, 0 errors
+clojure -M:test                     83 tests, 3833 assertions, 0 failures, 0 errors
 python scripts/verify_roundtrip.py  116 files nicloj wrote, all match nibabel
 ```
 
@@ -57,18 +58,21 @@ rather than restating docstrings.
 
 ## Known limitations
 
-**Memory.** Every voxel becomes a `double`, so an `int16` volume costs four
-times its file size in RAM and a `uint8` one eight times. The MNI152 template
-(8.7 million voxels) is about 70 MB loaded. A single array is also capped at
-`Integer.MAX_VALUE` elements, and the reader refuses a voxel block over 2 GiB
-with a clear message rather than failing obscurely.
+**Memory.** Voxels are held at their on-disk width, so a loaded image costs
+about what the file costs: the 2 mm MNI152 template (903k `int16` voxels) is
+1.6 MB rather than the 6.9 MB it took when everything was a `double`. Reading
+an element still gives a `double`. Two things still widen: `fdata` on an image
+with `scl_slope`/`scl_inter`, since scaled values no longer fit the source
+type, and `nd/values`, which realises a boxed Clojure vector. A single array is
+capped at `Integer.MAX_VALUE` elements, and the reader refuses a voxel block
+over 2 GiB with a clear message rather than failing obscurely.
 
-**64-bit integers past 2^53 are approximate.** A consequence of the same
-choice: `int64`/`uint64` values larger than a double can hold exactly are
-rounded on read and cannot be written back bit for bit. nibabel's
-`get_fdata()` loses the same precision, but its rewrite path copies the stored
-bytes, so this is a gap only in nicloj's write path. Pinned by
-`large-64-bit-values-are-approximate` in `nicloj.array-test`.
+**64-bit integers past 2^53 read approximately, but round-trip exactly.**
+`nd/value` and friends hand back a `double`, so a `uint64` of 2^64-2 reads as
+2^64. The bits themselves are kept, and rewriting the image to the same type
+copies them through `Store.getLong`, so the file survives unchanged. Converting
+to a *different* integer type still goes through a double and is still lossy.
+Pinned by `large-64-bit-values-survive-a-round-trip` in `nicloj.array-test`.
 
 **No complex or colour voxels.** `complex64`, `complex128`, `rgb24` and
 `rgba32` are recognised in the datatype table so headers describing them parse,

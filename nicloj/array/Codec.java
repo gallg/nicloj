@@ -26,62 +26,47 @@ public final class Codec {
         if (!type.isReal()) {
             throw new NiftiError(type.label() + " voxel data is not supported yet");
         }
-        double[] out = new double[n];
+        // Fill a store of the file's own type, so the array costs what the file
+        // costs rather than eight bytes a voxel.
+        Store out = Store.of(type, n);
         ByteBuffer b = ByteBuffer.wrap(raw, 0, (int) need).order(order);
         switch (type) {
             case UINT8:
-                for (int i = 0; i < n; i++) out[i] = b.get() & 0xFF;
+                for (int i = 0; i < n; i++) out.setLong(i, b.get() & 0xFF);
                 break;
             case INT8:
-                for (int i = 0; i < n; i++) out[i] = b.get();
+                for (int i = 0; i < n; i++) out.setLong(i, b.get());
                 break;
-            case INT16: {
+            case INT16: case UINT16: {
                 var v = b.asShortBuffer();
-                for (int i = 0; i < n; i++) out[i] = v.get();
+                for (int i = 0; i < n; i++) out.setLong(i, v.get());
                 break;
             }
-            case UINT16: {
-                var v = b.asShortBuffer();
-                for (int i = 0; i < n; i++) out[i] = v.get() & 0xFFFF;
-                break;
-            }
-            case INT32: {
+            case INT32: case UINT32: {
                 var v = b.asIntBuffer();
-                for (int i = 0; i < n; i++) out[i] = v.get();
+                for (int i = 0; i < n; i++) out.setLong(i, v.get());
                 break;
             }
-            case UINT32: {
-                var v = b.asIntBuffer();
-                for (int i = 0; i < n; i++) out[i] = v.get() & 0xFFFFFFFFL;
-                break;
-            }
-            case INT64: {
+            case INT64: case UINT64: {
                 var v = b.asLongBuffer();
-                for (int i = 0; i < n; i++) out[i] = v.get();
-                break;
-            }
-            case UINT64: {
-                var v = b.asLongBuffer();
-                for (int i = 0; i < n; i++) out[i] = unsigned(v.get());
+                for (int i = 0; i < n; i++) out.setLong(i, v.get());
                 break;
             }
             case FLOAT32: {
                 var v = b.asFloatBuffer();
-                for (int i = 0; i < n; i++) out[i] = v.get();
+                for (int i = 0; i < n; i++) out.set(i, v.get());
                 break;
             }
             case FLOAT64: {
                 var v = b.asDoubleBuffer();
-                for (int i = 0; i < n; i++) out[i] = v.get();
+                for (int i = 0; i < n; i++) out.set(i, v.get());
                 break;
             }
             default:
                 throw new NiftiError("no decoder for " + type.label());
         }
-        if (slope != 1.0 || inter != 0.0) {
-            for (int i = 0; i < n; i++) out[i] = out[i] * slope + inter;
-        }
-        return NdArray.wrap(shape, out);
+        // Scaling produces real-world values, which are doubles by definition.
+        return NdArray.wrap(shape, out).scaled(slope, inter);
     }
 
     /**
@@ -101,19 +86,23 @@ public final class Codec {
                     + " bytes, over the 2 GiB nicloj can hold in one array");
         }
         ByteBuffer b = ByteBuffer.allocate((int) size).order(order);
-        double[] src = arr.data();
+        Store src = arr.store();
         boolean unscale = slope != 1.0 || inter != 0.0;
-        if (type.isInteger()) {
+        if (type.isInteger() && !unscale && src.type() == type) {
+            // Writing back what we read: copy the integers as they stand, so an
+            // int64 past 2^53 is not rounded by a trip through a double.
+            for (int i = 0; i < n; i++) putRaw(b, type, src.getLong(i));
+        } else if (type.isInteger()) {
             double lo = type.minValue();
             double hi = type.maxValue();
             for (int i = 0; i < n; i++) {
-                double v = unscale ? (src[i] - inter) / slope : src[i];
+                double v = unscale ? (src.get(i) - inter) / slope : src.get(i);
                 v = Double.isNaN(v) ? 0.0 : Math.min(hi, Math.max(lo, Math.rint(v)));
                 putInt(b, type, v);
             }
         } else {
             for (int i = 0; i < n; i++) {
-                double v = unscale ? (src[i] - inter) / slope : src[i];
+                double v = unscale ? (src.get(i) - inter) / slope : src.get(i);
                 if (type == DataType.FLOAT32) b.putFloat((float) v); else b.putDouble(v);
             }
         }
@@ -175,5 +164,14 @@ public final class Codec {
         }
     }
 
-    private static double unsigned(long v) { return v >= 0 ? v : v + TWO_POW_64; }
+    /** Write an integer already known to be in range for {@code type}. */
+    private static void putRaw(ByteBuffer b, DataType type, long v) {
+        switch (type) {
+            case UINT8: case INT8: b.put((byte) v); break;
+            case INT16: case UINT16: b.putShort((short) v); break;
+            case INT32: case UINT32: b.putInt((int) v); break;
+            case INT64: case UINT64: b.putLong(v); break;
+            default: throw new NiftiError("no integer encoder for " + type.label());
+        }
+    }
 }

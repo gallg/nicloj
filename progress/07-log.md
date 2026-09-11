@@ -205,21 +205,21 @@ and the unsigned cast wrapped them to near 2^64 — not a deliberate boundary
 test, just an accident that the old random seed usually hid. Values are now
 clipped to the target type's range before casting.
 
-That accident did expose a genuine limitation, now recorded in
-[05-status.md](05-status.md) and pinned by a test: because every voxel is a
-double, `int64`/`uint64` magnitudes past 2^53 are rounded on read and cannot be
-written back bit for bit. nibabel's `get_fdata()` loses the same precision, but
-its rewrite path copies the stored bytes, so this is a gap only in nicloj's
-write path. It closes with todo item 1.
+That accident did expose a genuine limitation, recorded at the time in
+[05-status.md](05-status.md) and pinned by a test: because every voxel was a
+double, `int64`/`uint64` magnitudes past 2^53 were rounded on read and could
+not be written back bit for bit. Storing voxels in their on-disk type closed
+it — the bits now survive a same-type round trip via `Store.getLong`, though
+reading one element out as a double still rounds.
 
 Fixing the corpus then broke two of my own tests, which had hard-coded numbers
 copied out of the old data — a voxel value and a data range used as a
 tolerance. Both were rewritten to assert relationships or derive the number
 from the image, which is what they should have done in the first place.
 
-Final state: 80 tests, 3789 assertions, and the nibabel verification of all 116
-written files, passing both in the working tree and in a clean clone whose
-corpus was generated independently.
+State at that point: 80 tests, 3789 assertions, and the nibabel verification of
+all 116 written files, passing both in the working tree and in a clean clone
+whose corpus was generated independently.
 
 ## 10. Licence
 
@@ -231,3 +231,58 @@ already in the source comments.
 
 The provenance note lives in the README rather than in `LICENSE`, because extra
 prose in that file stops automated licence detectors matching it.
+
+## 11. Readable arrays, and voxels at their on-disk width
+
+Two changes that started from one complaint: printing a loaded image at a REPL
+crashed the terminal. `NdArray.toString` reported only a shape and a count, so
+the way to see anything was `nd/values`, and evaluating that spilled 902,629
+numbers onto one line — about 8 MB, enough to segfault `rlwrap`.
+
+The fix was to make the array print like a numpy one: nested brackets, and for
+anything over a thousand elements only the first and last three along each long
+axis. The whole MNI template now renders in 1 kB and 2 ms, because only the
+~343 shown values are ever visited. `nd/values` and `nd/nested` return an
+`ArrayView`, a sequential read-only collection that realises its elements on
+first use and prints the same way, so no `*print-length*` setting is needed to
+keep a REPL usable. Printing never forces the delay.
+
+Then the suggestion to switch the base type from `double` to `float`, for
+memory and speed. Neither held up. Narrowing `dtype-float64.nii` to float32 and
+back changes all 60 of its voxels, and `verify_roundtrip.py` compares at
+`atol=0`; the format also allows integers float32 cannot hold, `2^31-1` landing
+on `2147483648`. And Clojure has no primitive `float` — only `long` and
+`double` — so a `float[]` buffer would box on every access from Clojure and
+cost more than it saved.
+
+What the corpus could not show on its own is that it would have passed: every
+fixture happens to max out near 255, so exactness looked safe. The evidence
+that mattered came from the one dtype that fails, not from the suite being
+green.
+
+So todo item 1 was done instead, which gets a larger win for free. `NdArray`
+now delegates to a `Store`, one implementation per NIfTI type; every accessor
+still speaks `double`, and array operations carry the type through via
+`Store.alloc`. The 2 mm MNI template dropped from 6.9 MB to 1.6 MB, and
+`finite-range` got slightly faster rather than slower — less memory traffic
+outweighs the virtual call.
+
+`fdata` costs nothing extra because `scaled` already returned the array
+untouched for identity slope and inter, so an unscaled image hands back its own
+`int16` buffer. Only a genuinely scaled image widens.
+
+That closed the `int64` limitation from section 8: `Store.getLong` gives the
+writer an exact path when the source and target types agree, so the bits
+survive. The test that pinned the old behaviour started failing by asserting
+`not=` on bytes that now match — the pleasant kind of failure. It was rewritten
+to assert the round trip, keeping a case for what is still lossy, which is
+converting between two different integer types.
+
+A dead-code pass closed it out: ten `Store.array()` accessors written
+speculatively and never used, `NdArray.scalar`, `NdArray.indices` and
+`Mat.mulVec` with no callers at all, and `columnMajorStrides` narrowed to
+package-private. `NdArray.flat`/`setFlat` had no callers either but were kept
+and given a test, being the allocation-free way to walk a buffer in place.
+
+Final state: 84 tests, 3838 assertions, and the same 116-file nibabel
+verification.

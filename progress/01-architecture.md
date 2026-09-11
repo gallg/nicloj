@@ -76,7 +76,7 @@ project depends on it. `dev/check.sh` is portable and is tracked.
 | Header | `nicloj.header.NiftiHeader` (mutable, but only ever mutated through copying accessors) | same |
 | Affine | vector of four vectors of doubles | `double[][]` |
 | Voxel array | `nicloj.array.NdArray` | same |
-| Voxel values | `double`, always | `double[]` |
+| Voxel values | `double` on the way in and out | a `Store` of the file's own type |
 | Datatype | keyword, e.g. `:int16` | `DataType` enum |
 | Enumerated codes | keyword, e.g. `:aligned`, `:mm` | `int` plus a `Codes` lookup table |
 | Orientation | vector of `[out-axis flip]` pairs, `nil` for a dropped axis | `double[][]` with `NaN` for a dropped axis |
@@ -98,11 +98,21 @@ functional from the outside:
 
 ### Voxel arrays are column-major
 
-`NdArray` stores its `double[]` with the first axis varying fastest, matching
-the NIfTI file itself, so decoding is a straight copy. `nd/values` yields
+`NdArray` stores its buffer with the first axis varying fastest, matching the
+NIfTI file itself, so decoding is a straight copy. `nd/values` yields
 elements in that on-disk order; `nd/nested` gives the row-major nesting you
-would write by hand. Everything is doubles: an `int16` image costs four times
-its file size in memory, which is the price of one uniform representation.
+would write by hand. Elements read as doubles, but the buffer underneath is a
+`nicloj.array.Store` of the file's own type, so an `int16` image costs about
+what the file costs. `nd/dtype` reports it, and reshape, transpose, flip,
+slice and concat all carry it through.
+
+Both return an `ArrayView` rather than a vector outright: a sequential,
+read-only collection that realises its elements on first use and `=` a plain
+vector either way round. Use `vec` when a real vector is wanted. The reason is
+printing -- an `NdArray` and both views render like a numpy array, showing the
+first and last `EDGE` entries along each long axis, so evaluating a whole brain
+at a REPL costs a kilobyte instead of eight megabytes. Printing never realises
+the elements.
 
 ### Laziness
 

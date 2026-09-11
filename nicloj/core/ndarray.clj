@@ -3,7 +3,10 @@
 
   Voxel arrays are column-major: the first axis varies fastest, as in the NIfTI
   file itself. `values` therefore yields elements in on-disk order, while
-  `nested` gives the row-major nesting you would write by hand."
+  `nested` gives the row-major nesting you would write by hand.
+
+  Elements always read as doubles, but are stored at their on-disk width --
+  see `dtype`. Array operations carry that type through."
   (:refer-clojure :exclude [concat])
   (:import (nicloj.array NdArray)))
 
@@ -35,6 +38,10 @@
   ^NdArray [data]
   (if (instance? NdArray data) data (nested->array data)))
 
+(defn dtype
+  "The voxel type the elements are held in, as a keyword."
+  [^NdArray a] (keyword (.label (.dtype a))))
+
 (defn shape [^NdArray a] (vec (.shape a)))
 (defn ndim [^NdArray a] (.ndim a))
 (defn size [^NdArray a] (.size a))
@@ -44,20 +51,51 @@
   ^double [^NdArray a idx]
   (.get a (int-array idx)))
 
+(deftype ArrayView [^NdArray array ^String header ^clojure.lang.Delay d]
+  clojure.lang.Sequential
+  clojure.lang.IPersistentCollection
+  (seq [_] (seq @d))
+  (count [_] (count @d))
+  (cons [_ x] (cons x @d))
+  (empty [_] [])
+  (equiv [_ o] (= @d o))
+  clojure.lang.Indexed
+  (nth [_ i] (nth @d i))
+  (nth [_ i not-found] (nth @d i not-found))
+  clojure.lang.ILookup
+  (valAt [_ k] (get @d k))
+  (valAt [_ k not-found] (get @d k not-found))
+  clojure.lang.IReduceInit
+  (reduce [_ f init] (reduce f init @d))
+  Iterable
+  (iterator [_] (clojure.lang.RT/iter @d))
+  Object
+  (toString [_] (str header "\n" (.layout array))))
+
+(defmethod print-method ArrayView [v ^java.io.Writer w]
+  (.write w (str v)))
+
 (defn values
-  "All elements in column-major (on-disk) order."
+  "All elements in column-major (on-disk) order.
+
+  The elements are realised on first use, and printing shows only the ends of
+  the array, so handing a large one back to a REPL is cheap."
   [^NdArray a]
-  (vec (.data a)))
+  (->ArrayView (.reshape a (int-array [(.size a)]))
+               (str "#nicloj/values[" (.size a) "]")
+               (delay (vec (.toDoubleArray a)))))
 
 (defn nested
-  "Elements as row-major nested vectors."
+  "Elements as row-major nested vectors, realised on first use."
   [^NdArray a]
-  (let [shape (shape a)]
-    (letfn [(walk [idx depth]
-              (if (= depth (count shape))
-                (.get a (int-array idx))
-                (mapv #(walk (conj idx %) (inc depth)) (range (nth shape depth)))))]
-      (walk [] 0))))
+  (->ArrayView a (str "#nicloj/nested" (shape a))
+               (delay
+                (let [shape (shape a)]
+                  (letfn [(walk [idx depth]
+                            (if (= depth (count shape))
+                              (.get a (int-array idx))
+                              (mapv #(walk (conj idx %) (inc depth)) (range (nth shape depth)))))]
+                    (walk [] 0))))))
 
 (defn reshape ^NdArray [^NdArray a shape] (.reshape a (int-array shape)))
 (defn squeeze ^NdArray [^NdArray a] (.squeeze a))
@@ -95,3 +133,6 @@
   "True when `a` and `b` have the same shape and agree to within `atol`."
   ([a b] (close? a b 1e-9))
   ([^NdArray a ^NdArray b atol] (.closeTo a b (double atol))))
+
+(defmethod print-method NdArray [^NdArray a ^java.io.Writer w]
+  (.write w (.toString a)))

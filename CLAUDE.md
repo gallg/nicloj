@@ -68,8 +68,13 @@ The project root is the classpath root (`:paths ["." "target/classes"]`), so
   mutating public accessor.
 - **`NdArray` is column-major** — first axis fastest, matching the file. `values`
   returns that order; `nested` returns row-major nesting.
-- **Voxels are always `double`.** Consistent, and the reason for the memory
-  limitation in `progress/05-status.md`.
+- **Voxels read as `double`, but are stored at their on-disk width.**
+  `NdArray` delegates to a `nicloj.array.Store`, one implementation per NIfTI
+  type, so an `int16` volume costs two bytes a voxel. Every accessor still
+  takes and returns `double`; `Store.getLong`/`setLong` is the exact integer
+  path the writer uses so `int64` past 2^53 survives a round trip. Array
+  operations carry the type through, and `scaled` widens to `float64` because
+  scaled values are no longer representable in the source type.
 - **An image built from data has identity scaling.** `fdata` always applies
   `scl_slope`/`scl_inter`, so data handed to `image` or `with-data` must have
   those fields reset — both call `hdr/clear-scaling`. Skipping that scales twice.
@@ -90,7 +95,7 @@ Two directions, both must pass:
 
 1. `scripts/gen_testdata.py` builds 29 fixtures with nibabel plus
    `test-data/manifest.edn` recording what nibabel reports for each.
-2. `clojure -M:test` (80 tests, ~3800 assertions) asserts nicloj matches the
+2. `clojure -M:test` (83 tests, ~3830 assertions) asserts nicloj matches the
    manifest field by field, and rewrites every fixture into
    `test-data/out/`.
 3. `scripts/verify_roundtrip.py` has nibabel re-read all 116 outputs and compare
@@ -122,7 +127,7 @@ and the deliberate differences, `04-testing.md` for the harness,
 `05-status.md` for what works and what does not, `06-todo.md` for what is
 next, `07-log.md` for how it got here.
 
-The largest open item is item 1 in `06-todo.md`: keeping voxels in their
-on-disk type instead of widening everything to `double`. It changes the
-`fdata`/`raw-data` contract, so it is worth doing before other work builds on
-the current representation.
+Voxels now keep their on-disk type, which was the largest open item; the
+storage layer is `nicloj/array/Store.java` and the invariant above says what it
+guarantees. The largest remaining item is partial reads, item 1 in
+`06-todo.md`.

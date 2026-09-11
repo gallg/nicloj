@@ -107,8 +107,10 @@ has no direct equivalent for: `:auto` (default), `:keep`, or an explicit
 `1.0` with `scl_inter` `0.0`. Both mean "no scaling" under the spec, and both
 read back identically, but the bytes differ.
 
-**Value type.** Every voxel is a `double` in nicloj, so there is no equivalent
-of nibabel's `get_fdata(dtype=np.float32)` or of reading an on-disk-typed array.
+**Value type.** Voxels are stored in the file's own type, as in nibabel, but
+every accessor hands back a `double`. So `nd/dtype` answers what
+`get_data_dtype()` does, while there is no equivalent of asking for the values
+themselves in another width, the way `get_fdata(dtype=np.float32)` does.
 
 **Freesurfer hacks.** nibabel special-cases two Freesurfer conventions in
 `get_data_shape`/`set_data_shape`: `dim[1] == -1` with the real length in
