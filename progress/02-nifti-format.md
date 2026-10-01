@@ -72,7 +72,12 @@ arbitrary bytes survive; writing truncates rather than overflowing.
 
 For a single file, `vox_offset` is at least `sizeof_hdr + 4`: 352 for NIfTI-1,
 544 for NIfTI-2, more when extensions are present. The reader tolerates a
-`vox_offset` below `sizeof_hdr` by treating the struct size as the data start.
+`vox_offset` below that minimum by starting the data right after the 4-byte
+extender, which is where nibabel's fix-up puts it too (nibabel then refuses
+the file; nicloj reads it). A negative `vox_offset` in a pair is an error.
+
+Trailing NUL bytes of an extension's content are padding, and are stripped on
+read as nibabel does; the writer pads again to the 16-byte boundary.
 
 Compression is detected by sniffing the gzip magic `1F 8B` rather than trusting
 the file name, so a mislabelled `.nii` holding compressed bytes still loads.

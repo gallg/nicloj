@@ -17,6 +17,11 @@
                         {:expected (str f)})))
       (edn/read-string (slurp f)))))
 
+(defn entry
+  "The manifest entry for a corpus file."
+  [name]
+  (some #(when (= name (:file %)) %) @manifest))
+
 (defn corpus-file
   "Absolute path of a corpus file by name."
   [name]

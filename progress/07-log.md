@@ -286,3 +286,107 @@ and given a test, being the allocation-free way to walk a buffer in place.
 
 Final state: 84 tests, 3838 assertions, and the same 116-file nibabel
 verification.
+
+## 12. Partial reads, and a bug hunt
+
+`load-slab` reads a range of the last axis straight off disk. Cross-checking
+it against nibabel's `img.slicer` found three bugs in it before it landed:
+fractional bounds were truncated, an image with no xform drifted by half the
+cut, and the 5D path crashed.
+
+Then a hunt across the whole library, four areas at once, each comparing
+against nibabel or numpy. About 3700 random geometry and array cases agreed.
+What did not, and is now fixed with a regression test each:
+
+- NaN written to a scaled signed integer read back as `scl_inter`, not 0.
+- `with-dtype` then `:scaling :keep` slipped past the datatype check and clamped.
+- Negative or zero `pixdim[1..3]` and a `qfac` other than ±1 were used raw;
+  they are now fixed up on read exactly as nibabel does.
+- NIfTI-2 dims past `Integer.MAX_VALUE` were silently cast to `int`.
+- `apply-affine` accepted points of the wrong length, so `voxel->world` with
+  `[i j k t]` gave wrong coordinates.
+- An orientation holding `-1.0` did not flip the data while the affine was flipped.
+- `transpose` accepted repeated axes; ragged nested input was zero-filled.
+- `UP.HDR` looked for `UP.img`; companions now follow the case of the name.
+
+Then the input checks nibabel makes and nicloj did not: `save` now refuses a
+`:scaling` pair with a zero or non-finite slope or a non-finite intercept,
+an unknown `:scaling`, a `:version` other than 1 or 2, and scalers that
+overflow NIfTI-1's float32 (constant data of 1e39 used to write an unreadable
+file). Explicit and kept scalers are narrowed to float32 *before* encoding in
+NIfTI-1, not just when stored. On read, the magic must name the layout's own
+version, a corrupt extension block raises instead of vanishing, and a
+`vox_offset` far past the end no longer allocates its whole size up front.
+
+Last, the rough edges. `values`/`nested` now `conj` at the end and hash like
+the vectors they equal, so they work as set members and map keys; a 0-d
+`nested` is its one number. `close?` treats equal infinities as equal. A
+single-file `vox_offset` below the minimum used to read from byte 348, four
+bytes early, so the whole volume was shifted; it now reads from 352. Bad axes,
+fractional indices, non-numeric nested input, NaN affines, a 3x3 sform, an
+orientation longer than the data and truncated files all raise a `NiftiError`
+or `IllegalArgumentException` naming the problem, instead of a bare JVM
+exception or a silently wrong answer.
+
+## 13. Resampling
+
+`resample-from-to` and `resample-to-output`, after `nibabel.processing`. One
+Java kernel, `nicloj.array.Resample`, samples an N-D array through a
+voxel-to-voxel affine the way `scipy.ndimage.affine_transform` does with
+`mode='constant'`; those semantics were pinned down by probing scipy first:
+nothing past the last voxel is interpolated, nearest rounds halves up, and
+integer output rounds half away from zero and clamps.
+
+The corpus gained six images nibabel resampled -- to-output and from-to, both
+orders, int16, uint8, scaled and 4D sources, a `cval` -- each tagged in the
+manifest with how it was made, and nicloj must reproduce them. From-to targets
+are recorded as float64 in the manifest because the stored sform is only
+float32, which otherwise shows up as a 6e-7 disagreement that has nothing to
+do with the interpolation. A further 300 random cases against nibabel, 3D to
+5D, eight types, oblique grids, agreed to 1.8e-13. The first run of those had
+order and dtype accidentally correlated -- float64 never got linear -- which
+is why the counts per pair are now checked.
+
+The property tests found the one real bug: resampling an image onto its own
+grid lost the last slice. `minverse` left 9e-16 in a translation, which put
+the edge 1e-15 voxels outside, and scipy-style edges give that `cval`. nibabel
+only escapes because numpy's inverse happens to be exact there. The kernel now
+counts a point within 1e-9 voxels of the edge as on it.
+
+Linear resampling of the 1 mm MNI template takes 389 ms against scipy's 370.
+
+## 14. Fail loudly without nilearn, and a slicer that drops axes
+
+The generator used to skip nilearn's two real images when they were missing.
+Simulating that left 32 images and 373 fewer assertions, and the suite still
+passed. It now refuses to run, before deleting anything, and says which files
+it looked for.
+
+`slice-image` takes an integer spec past the third axis, picking one index and
+dropping the axis, with nibabel's rules: none on spatial axes, negatives from
+the end, out of range raises. Four nibabel slicer outputs joined the corpus.
+The one pitfall: dropping an axis must drop its voxel size too, or in 5D the
+remaining axis inherits the dropped one's. The 5D fixture's two trailing sizes
+are both 1.0 and could not show that, so a unit test with distinct sizes does.
+
+## 15. A clean-up pass
+
+Three reviews -- Java, Clojure source, tests and harness -- each finding
+checked against the code before anything changed. Removed: `Mat.format`,
+`Mat.diag` (test-only), `Orientations.axcodes`, both `NdArray.wrap` overloads
+and `NdArray.dim`, none of which had callers; the null-type and duplicated
+branches of `Store.of`; `Extension.readAll`'s byte-order parameter, which the
+buffer already carried; a redundant constructor; `->bytes`'s hand-rolled byte
+join, now the existing `concat-bytes`. Stale comments that described doubles
+or change history were rewritten to say what holds.
+
+In the tests: an assertion that could never fail, a duplicated big-endian
+comparison and an unused require went; corpus values copied into tests now come
+from the manifest through `fix/entry`, as the testing rules ask; a test whose
+label promised "transforming then applying gives the target codes" now does
+that; the NaN-slope case its label named is now tested. The generator reuses
+its `matrix` helper and produces a byte-identical corpus. clojure-lsp now
+reports no warnings at all.
+
+Kept on purpose: `flat`/`setFlat` (see section 11), the two-argument
+`la/close?` (public in a namespace meant to be used directly), and `version`.

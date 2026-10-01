@@ -80,8 +80,6 @@ public final class NiftiHeader {
     public String intentName = "";
     public List<Extension> extensions = new ArrayList<>();
 
-    public NiftiHeader() {}
-
     public static NiftiHeader of(int version) {
         NiftiHeader h = new NiftiHeader();
         h.version = version;
@@ -95,7 +93,12 @@ public final class NiftiHeader {
         int n = (int) dim[0];
         if (n < 0 || n > 7) throw new NiftiError("dim[0] out of range: " + dim[0]);
         int[] s = new int[n];
-        for (int i = 0; i < n; i++) s[i] = (int) dim[i + 1];
+        for (int i = 0; i < n; i++) {
+            if (dim[i + 1] < 0 || dim[i + 1] > Integer.MAX_VALUE) {
+                throw new NiftiError("dim[" + (i + 1) + "] out of range: " + dim[i + 1]);
+            }
+            s[i] = (int) dim[i + 1];
+        }
         return s;
     }
 
@@ -180,14 +183,18 @@ public final class NiftiHeader {
         }
         ByteBuffer b = ByteBuffer.wrap(buf).order(h.order);
         String magic = h.version == 2 ? h.read2(b) : h.read1(b);
-        if (magic.length() < 3 || !(magic.startsWith("n+") || magic.startsWith("ni"))) {
+        if (!magic.equals("n+" + h.version) && !magic.equals("ni" + h.version)) {
             throw new NiftiError("bad NIfTI magic '" + magic + "'");
         }
         h.singleFile = magic.charAt(1) == '+';
+        // nibabel's load-time fix-ups: qfac other than +-1 becomes 1, and
+        // spatial pixdims become positive, with 0 read as 1.
+        if (h.pixdim[0] != 1 && h.pixdim[0] != -1) h.pixdim[0] = 1;
+        for (int i = 1; i <= 3; i++) h.pixdim[i] = h.pixdim[i] == 0 ? 1 : Math.abs(h.pixdim[i]);
         long limit = h.singleFile && h.voxOffset > 0
                 ? Math.min(h.voxOffset, buf.length) : buf.length;
         b.position(h.structSize());
-        h.extensions = Extension.readAll(b, h.order, limit);
+        h.extensions = Extension.readAll(b, limit);
         return h;
     }
 

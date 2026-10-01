@@ -24,6 +24,7 @@ public final class Orientations {
      * axes. Pass a non-positive {@code tol} to use numpy's default rank cutoff.
      */
     public static double[][] ioOrientation(double[][] affine, double tol) {
+        Affines.requireFinite(affine);
         int q = affine.length - 1;
         int p = affine[0].length - 1;
         double[][] rzs = Mat.block(affine, q, p);
@@ -102,11 +103,6 @@ public final class Orientations {
             if (!found) throw new NiftiError("unknown axis code '" + code + "'");
         }
         return ornt;
-    }
-
-    /** Axis labels of an affine's input axes, i.e. {@code ioOrientation} then {@code toAxcodes}. */
-    public static String[] axcodes(double[][] affine) {
-        return toAxcodes(ioOrientation(affine, 0), RAS_LABELS);
     }
 
     /** The orientation taking data from {@code start} to {@code end}. */

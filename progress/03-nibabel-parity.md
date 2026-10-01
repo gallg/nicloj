@@ -14,6 +14,7 @@ This is the mapping, and the places behaviour deliberately differs.
 | `Nifti1Image(data, affine, header)` | `nii/image` |
 | `img.to_bytes()` / `from_bytes()` | `nii/->bytes` / `nii/from-bytes` |
 | `Nifti1Header.from_fileobj` | `nii/read-header` |
+| `img.slicer[..., a:b]` (last axis) | `nii/load-slab path a b` |
 
 ### Image
 
@@ -64,7 +65,18 @@ This is the mapping, and the places behaviour deliberately differs.
 | `squeeze_image` | `nii/squeeze-image` |
 | `concat_images` | `nii/concat-images` |
 | `four_to_three` | `nii/four-to-three` |
-| `img.slicer[...]` | `nii/slice-image` |
+| `img.slicer[...]`, `img.slicer[..., 3]` | `nii/slice-image`, with an integer to drop an axis past the third |
+
+### Resampling (`nibabel.processing`)
+
+| nibabel | nicloj |
+| --- | --- |
+| `resample_from_to(img, to, order, cval=...)` | `nii/resample-from-to img to :order :cval` |
+| `resample_to_output(img, voxel_sizes, order)` | `nii/resample-to-output img :voxel-sizes :order` |
+
+Only `order` 0 and 1 exist, and the default is 1 where nibabel's is 3. At
+those orders the voxels match nibabel's to rounding noise: exactly for integer
+types, within 1e-12 for floats, over the corpus and 300 random cases.
 
 ### Affines (`nibabel.affines`)
 
@@ -112,6 +124,25 @@ every accessor hands back a `double`. So `nd/dtype` answers what
 `get_data_dtype()` does, while there is no equivalent of asking for the values
 themselves in another width, the way `get_fdata(dtype=np.float32)` does.
 
+**xform codes after slicing.** nibabel's slicer rebuilds the image from its
+affine, so a qform-only file comes back with `qform_code` 0 and an `:aligned`
+sform. `load-slab` shifts whichever forms were set and keeps their codes. The
+affines agree; only the codes differ.
+
+**`dim[0] = 0`.** nibabel reads it as shape `(0,)`, zero voxels; nicloj reads
+it as a 0-d image of one voxel, which is also what a fresh `new-header`
+describes. Changing it would change every new header for an edge case where
+nibabel itself drops the voxel nicloj keeps.
+
+**Resampling at the edge.** scipy gives `cval` to a point even 1e-15 voxels
+past the grid, so when composing affines leaves rounding residue it can lose a
+whole edge slice; resampling an image onto its own grid did exactly that.
+nicloj counts a point within 1e-9 voxels of the edge as on it.
+
+**Resampling a series onto a 3D grid.** nibabel needs the target to have as
+many axes as the source; nicloj fills missing trailing axes in from the
+source, so a 4D series resamples onto a 3D template volume by volume.
+
 **Freesurfer hacks.** nibabel special-cases two Freesurfer conventions in
 `get_data_shape`/`set_data_shape`: `dim[1] == -1` with the real length in
 `glmin`, and the ico7 surface shape `(27307, 1, 6)` standing for
@@ -125,9 +156,8 @@ GIFTI, CIFTI-2, Analyze and Freesurfer formats. nicloj is NIfTI only.
 
 - Complex (`complex64`, `complex128`) and colour (`rgb24`, `rgba32`) voxel
   types — recognised, but decoding raises.
-- `nibabel.processing`: `resample_from_to`, `resample_to_output`,
-  `smooth_image`, `conform`. These need interpolation and a Gaussian kernel;
-  none of it is hard, but it is a separate piece of work.
+- `nibabel.processing`: cubic-spline resampling (`order` 2 to 5),
+  `smooth_image` and `conform`.
 - Typed extension classes (`Nifti1Extension` subclasses for AFNI, DICOM,
   comments). Extensions are carried as opaque bytes with their `ecode`.
 - `nibabel.imagestats`, `nibabel.viewers`, the command-line tools.

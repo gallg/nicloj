@@ -16,7 +16,7 @@
   "Split `path` into its non-gzip stem and a `.gz` suffix (possibly empty)."
   [path]
   (if (gz? path)
-    [(subs path 0 (- (count path) 3)) ".gz"]
+    [(subs path 0 (- (count path) 3)) (subs path (- (count path) 3))]
     [path ""]))
 
 (defn- cut-ext
@@ -31,15 +31,18 @@
 
   Returns `{:header p, :image p, :single? bool}`. For a `.nii` image both
   paths are the same file; for a pair, `:image` mirrors the gzip suffix of the
-  name given. Throws when the extension is not a NIfTI one."
+  name given, and the companion's extension is upper case when the given one
+  is, as in nibabel. Throws when the extension is not a NIfTI one."
   [path]
   (let [path (str path)
         [stem gz] (split-gz path)
-        [base ext] (cut-ext stem)]
+        [base ext] (cut-ext stem)
+        given (subs stem (count base))
+        companion (fn [e] (str base (if (= given (str/upper-case given)) (str/upper-case e) e) gz))]
     (case ext
       ".nii" {:header path :image path :single? true}
-      ".hdr" {:header path :image (str base ".img" gz) :single? false}
-      ".img" {:header (str base ".hdr" gz) :image path :single? false}
+      ".hdr" {:header path :image (companion ".img") :single? false}
+      ".img" {:header (companion ".hdr") :image path :single? false}
       (throw (ex-info (str "not a NIfTI filename: " path
                            " (expected .nii, .nii.gz, .hdr, .img or a .gz of those)")
                       {:path path})))))

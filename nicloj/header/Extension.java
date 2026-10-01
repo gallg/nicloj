@@ -4,6 +4,7 @@ import java.io.ByteArrayOutputStream;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 /**
@@ -32,18 +33,23 @@ public final class Extension {
     }
 
     /** Read the extender byte and any extension blocks that follow it. */
-    public static List<Extension> readAll(ByteBuffer buf, ByteOrder order, long limit) {
+    public static List<Extension> readAll(ByteBuffer buf, long limit) {
         List<Extension> out = new ArrayList<>();
         if (buf.remaining() < 4 || buf.get(buf.position()) == 0) return out;
         buf.position(buf.position() + 4);
-        buf.order(order);
-        while (buf.position() + 8 <= limit) {
+        while (buf.position() + 16 <= limit) {
             int esize = buf.getInt();
             int ecode = buf.getInt();
-            if (esize < 8 || buf.position() + esize - 8 > limit) break;
+            if (esize < 8 || buf.position() + esize - 8 > limit) {
+                throw new NiftiError("corrupt header extension: esize " + esize
+                        + " at byte " + (buf.position() - 8));
+            }
             byte[] payload = new byte[esize - 8];
             buf.get(payload);
-            out.add(new Extension(ecode, payload));
+            // The block is zero-padded to 16 bytes; nibabel strips that, so do we.
+            int len = payload.length;
+            while (len > 0 && payload[len - 1] == 0) len--;
+            out.add(new Extension(ecode, Arrays.copyOf(payload, len)));
         }
         return out;
     }

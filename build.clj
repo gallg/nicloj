@@ -5,6 +5,10 @@
     javac -d target/classes $(find nicloj -name '*.java')"
   (:require [clojure.tools.build.api :as b]))
 
+(def version
+  "nicloj's version. Bump it here, and only here, with each release."
+  "0.1.0")
+
 (def class-dir "target/classes")
 
 (defn javac

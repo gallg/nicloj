@@ -5,8 +5,9 @@
   a mislabelled `.nii` holding compressed bytes still loads. Writing
   compresses when the name ends in `.gz`."
   (:require [nicloj.io.paths :as paths])
-  (:import (java.io BufferedInputStream BufferedOutputStream File FileInputStream
+  (:import (java.io BufferedInputStream BufferedOutputStream EOFException File FileInputStream
                     FileOutputStream InputStream OutputStream PushbackInputStream)
+           (nicloj.header NiftiError)
            (java.util.zip GZIPInputStream GZIPOutputStream)))
 
 (def ^:private buffer-size 65536)
@@ -44,10 +45,10 @@
   (let [buf (byte-array n)]
     (loop [off 0]
       (when (< off n)
-        (let [got (.read in buf off (- n off))]
+        (let [got (long (try (.read in buf off (- n off))
+                             (catch EOFException _ -1)))]   ; a truncated gzip stream
           (if (neg? got)
-            (throw (ex-info (str "unexpected end of file after " off " of " n " bytes")
-                            {:read off :expected n}))
+            (throw (NiftiError. (str "unexpected end of file after " off " of " n " bytes")))
             (recur (+ off got))))))
     buf))
 
@@ -60,8 +61,7 @@
         (if (pos? got)
           (recur (- left got))
           (if (neg? (.read in))
-            (throw (ex-info (str "unexpected end of file while skipping " n " bytes")
-                            {:bytes n}))
+            (throw (NiftiError. (str "unexpected end of file while skipping " n " bytes")))
             (recur (dec left))))))))
 
 (defn write-all!

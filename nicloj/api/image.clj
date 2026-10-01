@@ -13,8 +13,8 @@
 
   Each name below is re-exported from the module that implements it, so
   `nicloj.core.nifti`, `nicloj.core.image`, `nicloj.core.header`,
-  `nicloj.core.ndarray`, `nicloj.core.orientation`, `nicloj.core.funcs` and
-  `nicloj.core.linalg` can also be used directly."
+  `nicloj.core.ndarray`, `nicloj.core.orientation`, `nicloj.core.funcs`,
+  `nicloj.core.processing` and `nicloj.core.linalg` can also be used directly."
   (:refer-clojure :exclude [load])
   (:require [nicloj.core.funcs :as funcs]
             [nicloj.core.header :as hdr]
@@ -22,7 +22,8 @@
             [nicloj.core.linalg :as la]
             [nicloj.core.ndarray :as nd]
             [nicloj.core.nifti :as nifti]
-            [nicloj.core.orientation :as ornt]))
+            [nicloj.core.orientation :as ornt]
+            [nicloj.core.processing :as proc]))
 
 (defmacro ^:private reexport
   "Define a var here for each name given, carrying over its docstring and
@@ -35,7 +36,7 @@
                              (select-keys (meta (var ~target)) [:doc :arglists]))))))
 
 ;; Files
-(reexport nifti/load nifti/save nifti/read-header nifti/from-bytes
+(reexport nifti/load nifti/load-slab nifti/save nifti/read-header nifti/from-bytes
           [->bytes nifti/->bytes])
 
 ;; Images
@@ -71,6 +72,9 @@
 ;; Whole-image operations
 (reexport funcs/squeeze-image funcs/concat-images funcs/four-to-three
           funcs/slice-image funcs/voxel->world funcs/world->voxel)
+
+;; Resampling
+(reexport proc/resample-from-to proc/resample-to-output)
 
 ;; Affine arithmetic
 (reexport la/mmul la/minverse la/mdet la/apply-affine la/voxel-sizes

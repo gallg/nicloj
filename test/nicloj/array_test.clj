@@ -184,8 +184,8 @@
   (let [^ArrayView v (nd/values a234)
         ^ArrayView n (nd/nested a234)]
     (testing "printing does not realise the elements"
-      (str v)
-      (str n)
+      (is (string? (str v)))
+      (is (string? (str n)))
       (is (not (realized? (.-d v))))
       (is (not (realized? (.-d n)))))
     (testing "and the data is there when asked for"
@@ -235,3 +235,31 @@
       (.setFlat a 0 3.7)
       (is (= :int16 (nd/dtype a)))
       (is (= 3.0 (nd/value a [0])) "3.7 stored into int16 truncates"))))
+
+(deftest bad-permutations-and-ragged-input-are-rejected
+  (is (thrown? IllegalArgumentException (nd/transpose a234 [0 0 1])))
+  (is (thrown? IllegalArgumentException (nd/transpose a234 [0 1 3])))
+  (is (thrown? IllegalArgumentException (nd/coerce [[1 2] [3]])))
+  (is (thrown? IllegalArgumentException (nd/coerce [[1 2] [3 4 5]])))
+  (is (thrown? IllegalArgumentException (nd/coerce [[1 2] 3]))))
+
+(deftest views-grow-and-hash-like-the-vectors-they-equal
+  (let [v (nd/values (nd/array [3] [1 2 3]))]
+    (is (= [1.0 2.0 3.0 4.0] (conj v 4.0)))
+    (is (= [1.0 2.0 3.0 4.0 5.0] (into v [4.0 5.0])))
+    (is (= (hash [1.0 2.0 3.0]) (hash v)))
+    (is (contains? #{[1.0 2.0 3.0]} v)))
+  (is (= 3.5 (nd/nested (nd/array [] [3.5]))) "0-d nests as its element"))
+
+(deftest close-treats-equal-infinities-as-equal
+  (let [x (nd/array [2] [##Inf ##-Inf])]
+    (is (nd/close? x x))
+    (is (not (nd/close? x (nd/array [2] [##-Inf ##Inf]))))))
+
+(deftest bad-arguments-get-clear-errors
+  (is (thrown-with-msg? IllegalArgumentException #"axis 3 out of range" (nd/flip a234 3)))
+  (is (thrown-with-msg? IllegalArgumentException #"axis 3 out of range" (nd/concat [a234 a234] 3)))
+  (is (thrown-with-msg? IllegalArgumentException #"must be integers" (nd/value a234 [1.5 0 0])))
+  (is (thrown? IllegalArgumentException (nd/coerce [[1 nil]])))
+  (is (thrown? IllegalArgumentException (nd/coerce [[1 "x"]])))
+  (is (= [1 3 4] (nd/shape (nd/slice a234 [[1 nil] nil nil]))) "nil inside a triple"))

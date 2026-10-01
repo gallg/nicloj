@@ -6,11 +6,11 @@ import nicloj.header.DataType;
  * Backing storage for an {@link NdArray}, one implementation per NIfTI voxel
  * type.
  *
- * <p>Everything above this layer speaks {@code double}, as it always has; the
- * store is what keeps the values at their on-disk width, so an {@code int16}
- * volume costs two bytes a voxel rather than eight. {@link #getLong} gives the
- * writer an exact path for integer types, which is why {@code int64} values
- * past 2^53 now survive a read-write round trip.
+ * <p>Everything above this layer speaks {@code double}; the store keeps the
+ * values at their on-disk width, so an {@code int16} volume costs two bytes a
+ * voxel rather than eight. {@link #getLong} gives the writer an exact path for
+ * integer types, so {@code int64} values past 2^53 survive a read-write round
+ * trip.
  */
 public abstract class Store {
     public abstract int size();
@@ -36,9 +36,8 @@ public abstract class Store {
     /** True when the type can hold NaN or an infinity. */
     public boolean canBeNonFinite() { return !exact(); }
 
-    /** A zeroed store for {@code type}, or a {@link Doubles} one for a null type. */
+    /** A zeroed store for {@code type}. */
     public static Store of(DataType type, int n) {
-        if (type == null) return new Doubles(n);
         switch (type) {
             case UINT8: return new UBytes(n);
             case INT8: return new Bytes(n);
@@ -50,7 +49,7 @@ public abstract class Store {
             case UINT64: return new ULongs(n);
             case FLOAT32: return new Floats(n);
             case FLOAT64: return new Doubles(n);
-            default: return new Doubles(n);
+            default: throw new IllegalArgumentException("no store for " + type.label());
         }
     }
 

@@ -60,6 +60,7 @@ public final class Affines {
         if (affine.length != 4 || affine[0].length != 4) {
             throw new NiftiError("need a 4x4 affine");
         }
+        requireFinite(affine);
         double[][] rzs = Mat.block(affine, 3, 3);
         double[] zooms = Mat.columnNorms(rzs);
         for (double z : zooms) {
@@ -111,9 +112,22 @@ public final class Affines {
         return aff;
     }
 
+    /** Throw unless every entry of {@code m} is finite. */
+    static void requireFinite(double[][] m) {
+        for (double[] row : m) {
+            for (double v : row) {
+                if (!Double.isFinite(v)) throw new NiftiError("affine has a non-finite entry: " + v);
+            }
+        }
+    }
+
     /** Map one point through an affine. */
     public static double[] apply(double[][] affine, double[] point) {
         int n = affine.length - 1;
+        if (point.length != affine[0].length - 1) {
+            throw new NiftiError("expected a point of length " + (affine[0].length - 1)
+                    + ", got " + point.length);
+        }
         double[] out = new double[n];
         for (int i = 0; i < n; i++) {
             double acc = affine[i][n];

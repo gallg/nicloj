@@ -28,7 +28,7 @@
     (instance? DataType t) (keyword (.label ^DataType t))
     :else (throw (NiftiError. (str "cannot read a datatype from " (pr-str t))))))
 
-(defn- ^DataType data-type [t]
+(defn- data-type ^DataType [t]
   (if (instance? DataType t) t (DataType/fromLabel (name (dtype t)))))
 
 ;; ---------------------------------------------------------------- construction
@@ -145,6 +145,8 @@
   previously unset."
   ([h affine] (set-sform h affine nil))
   ([^NiftiHeader h affine code]
+   (when (and affine (not (and (= 4 (count affine)) (every? #(= 4 (count %)) affine))))
+     (throw (NiftiError. "need a 4x4 affine")))
    (edit h (fn [^NiftiHeader c]
              (set! (.sformCode c)
                    (int (cond code (kw->code Codes/XFORM code)

@@ -10,12 +10,6 @@ public final class Mat {
         return m;
     }
 
-    public static double[][] diag(double[] d) {
-        double[][] m = new double[d.length][d.length];
-        for (int i = 0; i < d.length; i++) m[i][i] = d[i];
-        return m;
-    }
-
     public static double[][] copy(double[][] a) {
         double[][] m = new double[a.length][];
         for (int i = 0; i < a.length; i++) m[i] = a[i].clone();
@@ -47,7 +41,6 @@ public final class Mat {
         }
         return c;
     }
-
 
     /** Top-left {@code rows x cols} block. */
     public static double[][] block(double[][] a, int rows, int cols) {
@@ -133,14 +126,5 @@ public final class Mat {
             }
         }
         return true;
-    }
-
-    public static String format(double[][] a) {
-        StringBuilder sb = new StringBuilder();
-        for (double[] row : a) {
-            for (double v : row) sb.append(String.format("%12.6g", v));
-            sb.append('\n');
-        }
-        return sb.toString();
     }
 }

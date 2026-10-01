@@ -2,7 +2,6 @@
   "Header defaults, field accessors and the binary layout."
   (:require [clojure.test :refer [deftest is testing]]
             [nicloj.core.header :as hdr]
-            [nicloj.core.linalg :as la]
             [nicloj.fixtures :refer [all-close?]])
   (:import (nicloj.header Extension NiftiError NiftiHeader)))
 
@@ -35,9 +34,9 @@
     (is (= [4 5 6 7] (hdr/shape h)))
     (is (all-close? [2.0 2.0 2.0 0.8] (hdr/zooms h)))
     (is (= [8 8 8] (hdr/shape (hdr/set-shape h [8 8 8])))))
-  (testing "zooms must match the number of dimensions"
-    (is (thrown? NiftiError (hdr/set-zooms (hdr/new-header :shape [4 5 6]) [1 1])))
-    (is (thrown? NiftiError (hdr/set-zooms (hdr/new-header :shape [4]) [-1]))))
+  (is (thrown? NiftiError (hdr/set-zooms (hdr/new-header :shape [4 5 6]) [1 1]))
+      "zooms must match the number of dimensions")
+  (is (thrown? NiftiError (hdr/set-zooms (hdr/new-header :shape [4]) [-1])) "zooms must be positive")
   (is (thrown? NiftiError (hdr/new-header :shape (repeat 8 2))) "at most seven dimensions"))
 
 (deftest datatype-names
@@ -87,6 +86,8 @@
   (testing "a zero or NaN slope means no scaling"
     (let [h (hdr/copy (hdr/new-header))]
       (set! (.sclSlope h) 0.0)
+      (is (nil? (hdr/slope-inter h)))
+      (set! (.sclSlope h) ##NaN)
       (is (nil? (hdr/slope-inter h))))))
 
 (deftest units-and-dim-info
@@ -160,3 +161,41 @@
     (is (re-find #"NIfTI-1" text))
     (is (re-find #"\[4 5 6\]" text))
     (is (re-find #"float32" text))))
+
+(deftest bad-pixdims-are-fixed-on-read-as-nibabel-does
+  (let [buf (hdr/to-bytes (hdr/set-shape (hdr/new-header) [2 2 2]))
+        bb (doto (java.nio.ByteBuffer/wrap buf) (.order java.nio.ByteOrder/LITTLE_ENDIAN))]
+    ;; pixdim[0..2] start at byte 76 of a NIfTI-1 header
+    (.putFloat bb 76 -0.5)
+    (.putFloat bb 80 -2.0)
+    (.putFloat bb 84 0.0)
+    (let [h (hdr/from-bytes buf)]
+      (is (= 1.0 (.qfac h)))
+      (is (= [2.0 1.0] (subvec (hdr/zooms h) 0 2))))))
+
+(deftest oversized-dims-are-an-error
+  (let [h (hdr/set-shape (hdr/new-header :version 2) [2 2])]
+    (aset (.dim h) 1 (+ 4 (long Integer/MAX_VALUE)))
+    (is (thrown? NiftiError (hdr/shape h)))))
+
+(deftest magic-must-match-the-layout
+  (let [buf (hdr/to-bytes (hdr/new-header :shape [2 2 2]))]
+    (aset-byte buf 346 (byte (int \2)))                    ; "n+2" in a 348-byte header
+    (is (thrown? NiftiError (hdr/from-bytes buf)))))
+
+(deftest corrupt-extensions-raise-but-short-padding-does-not
+  (let [h (hdr/copy (hdr/new-header :shape [2 2 2]))
+        _ (.add (.extensions h) (Extension. 6 (.getBytes "payload")))
+        good (hdr/to-bytes h)
+        bb (doto (java.nio.ByteBuffer/wrap (aclone good)) (.order java.nio.ByteOrder/LITTLE_ENDIAN))]
+    (is (= 1 (count (hdr/extensions (hdr/from-bytes (byte-array (concat good (repeat 8 0))))))))
+    (.putInt bb 352 1000)                                  ; esize past the end
+    (is (thrown? NiftiError (hdr/from-bytes (.array bb))))
+    (.putInt bb 352 0)
+    (is (thrown? NiftiError (hdr/from-bytes (.array bb))))))
+
+(deftest sform-needs-a-4x4-and-extension-padding-is-stripped
+  (is (thrown? NiftiError (hdr/set-sform (hdr/new-header) [[1 0 0] [0 1 0] [0 0 1]])))
+  (let [h (hdr/copy (hdr/new-header :shape [2 2 2]))]
+    (.add (.extensions h) (Extension. 6 (.getBytes "text")))
+    (is (= "text" (String. (.content (first (hdr/extensions (reread h)))))))))

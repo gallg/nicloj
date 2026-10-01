@@ -47,12 +47,13 @@
 
 (deftest with-header-preserves-voxel-values
   (let [img (nii/load (fix/corpus-file "nifti1-3d-int16-scaled.nii.gz"))
-        value (nii/voxel img [0 0 0])]
-    (is (= [0.25 -3.5] (nii/slope-inter (nii/header img))))
+        value (nii/voxel img [0 0 0])
+        scl (nii/slope-inter (nii/header img))]
+    (is (= (:scl (fix/entry "nifti1-3d-int16-scaled.nii.gz")) scl))
     (testing "an unrelated header does not silently rescale the stored data"
       (let [swapped (nii/with-header img (nii/new-header :shape [6 7 5] :dtype :int16))]
         (is (= value (nii/voxel swapped [0 0 0])))
-        (is (= [0.25 -3.5] (nii/slope-inter (nii/header swapped))))))
+        (is (= scl (nii/slope-inter (nii/header swapped))))))
     (testing "other fields of the new header are still adopted"
       (let [tagged (nii/with-header img (nii/set-descrip (nii/new-header :shape [6 7 5]) "tag"))]
         (is (= "tag" (nii/descrip (nii/header tagged))))
@@ -143,6 +144,36 @@
 (deftest reorienting-updates-dim-info
   (let [img (nii/load (fix/corpus-file "nifti1-3d-float32.nii"))
         rotated (nii/as-reoriented img [[1 1] [0 1] [2 1]])]
-    (is (= [0 1 2] (nii/dim-info (nii/header img))))
-    (is (= [1 0 2] (nii/dim-info (nii/header rotated)))
+    (is (= (:dim-info (fix/entry "nifti1-3d-float32.nii")) (nii/dim-info (nii/header img))))
+    (is (= (mapv {0 1, 1 0, 2 2} (nii/dim-info (nii/header img)))
+           (nii/dim-info (nii/header rotated)))
         "the frequency and phase axes swap with the data")))
+
+(deftest concat-images-names-a-mismatched-shape
+  (let [a (nii/image [[[1 2]]] affine)
+        b (nii/image [[[1 2 3]]] affine)]
+    (is (thrown-with-msg? nicloj.header.NiftiError #"image 1 has shape" (nii/concat-images [a b])))))
+
+(deftest slicing-matches-nibabels-slicer
+  (doseq [{:keys [file sliced]} @fix/manifest :when sliced]
+    (testing file
+      (let [want (nii/load (fix/corpus-file file))
+            got (nii/slice-image (nii/load (fix/corpus-file (:source sliced))) (:specs sliced))]
+        (is (= (nii/shape want) (nii/shape got)))
+        (is (all-close? (nii/affine want) (nii/affine got) 1e-6))
+        (is (all-close? (nii/zooms want) (nii/zooms got)))
+        (is (nii/array-close? (nii/fdata want) (nii/fdata got) 0.0))))))
+
+(deftest integer-specs-drop-axes-past-the-third
+  (let [img (nii/image (nii/array [2 2 2 3 4] (range 96)) affine)
+        img (nii/with-header img (nii/set-zooms (nii/header img) [2 2 2.5 3 7]))]
+    (testing "the dropped axis takes its voxel size with it"
+      (is (= [2 2 2 4] (nii/shape (nii/slice-image img [nil nil nil 1]))))
+      (is (all-close? [2 2 2.5 7] (nii/zooms (nii/slice-image img [nil nil nil 1])))))
+    (testing "negative indices count from the end"
+      (is (nii/array-close? (nii/fdata (nii/slice-image img [nil nil nil 2 3]))
+                            (nii/fdata (nii/slice-image img [nil nil nil -1 -1])) 0.0)))
+    (doseq [[specs msg] [[[nil nil 1] #"spatial axis 2"]
+                         [[nil nil nil 3] #"out of range"]
+                         [[nil nil nil -4] #"out of range"]]]
+      (is (thrown-with-msg? nicloj.header.NiftiError msg (nii/slice-image img specs))))))

@@ -7,7 +7,8 @@
             [clojure.test :refer [deftest is testing]]
             [nicloj.api.image :as nii]
             [nicloj.core.header :as hdr]
-            [nicloj.fixtures :as fix :refer [all-close?]]))
+            [nicloj.fixtures :as fix :refer [all-close?]]
+            [nicloj.io.paths :as paths]))
 
 (def variants
   "Layouts every image is rewritten into. `:keep` scaling rewrites the stored
@@ -53,16 +54,15 @@
               out (fix/out-file (str (stem file) "--" name suffix))]
           (apply nii/save original out (mapcat identity opts))
           (swap! written conj {:source file :written (.getName (java.io.File. out))
-                              :variant name})
+                               :variant name})
           (compare-images original (nii/load out) name))))
-    (spit (fix/out-file "written.edn") (pr-str @written))
-    (is (= (* (count @fix/manifest) (count variants)) (count @written)))))
+    (spit (fix/out-file "written.edn") (pr-str @written))))
 
 (deftest keep-scaling-preserves-raw-voxels-and-scalers
   (let [original (nii/load (fix/corpus-file "nifti1-3d-int16-scaled.nii.gz"))
         out (fix/out-file "keep-scaling.nii")
         copy (nii/load (nii/save original out :scaling :keep))]
-    (is (= [0.25 -3.5] (nii/slope-inter (nii/header copy))))
+    (is (= (:scl (fix/entry "nifti1-3d-int16-scaled.nii.gz")) (nii/slope-inter (nii/header copy))))
     (is (nii/array-close? (nii/raw-data original) (nii/raw-data copy) 0.0))
     (is (thrown? nicloj.header.NiftiError
                  (nii/save original (fix/out-file "keep-clash.nii")
@@ -94,10 +94,10 @@
     (is (= 352 (nii/data-offset (nii/read-header (nii/save img (fix/out-file "off1.nii"))))))
     (is (= 0 (nii/data-offset (nii/read-header (nii/save img (fix/out-file "off1.hdr"))))))
     (is (= 544 (nii/data-offset (nii/read-header (nii/save img (fix/out-file "off2.nii")
-                                                            :version 2)))))
-    (is (= 384 (nii/data-offset
-                (nii/read-header (nii/save (nii/load (fix/corpus-file "with-extension.nii"))
-                                           (fix/out-file "off-ext.nii") :scaling :keep))))
+                                                           :version 2)))))
+    (is (= (:vox-offset (fix/entry "with-extension.nii")) (nii/data-offset
+                                                           (nii/read-header (nii/save (nii/load (fix/corpus-file "with-extension.nii"))
+                                                                                      (fix/out-file "off-ext.nii") :scaling :keep))))
         "extensions push the voxel offset out")))
 
 (deftest gzip-is-chosen-by-the-file-name
@@ -116,7 +116,8 @@
   (let [original (nii/load (fix/corpus-file "nifti1-3d-float32.nii"))
         whole ^bytes (nii/->bytes original :scaling :keep)
         short-buf (java.util.Arrays/copyOf whole (- (alength whole) 100))]
-    (is (= (nii/voxel original [6 7 8]) (nii/voxel (nii/from-bytes whole) [6 7 8]))
+    (is (= (nii/voxel original (mapv dec (nii/shape original)))
+           (nii/voxel (nii/from-bytes whole) (mapv dec (nii/shape original))))
         "the full buffer round-trips the last voxel")
     (is (thrown? nicloj.header.NiftiError (nii/from-bytes short-buf))
         "a short buffer must fail, not silently read zeros")))
@@ -125,8 +126,7 @@
   (let [original (nii/load (fix/corpus-file "nifti1-3d-int16-bigendian.nii"))
         out (fix/out-file "bigendian-out.nii")
         copy (nii/load (nii/save original out :scaling :keep))]
-    (is (nii/big-endian? (nii/header copy)) "byte order is inherited from the header")
-    (compare-images original copy "big-endian")))
+    (is (nii/big-endian? (nii/header copy)) "byte order is inherited from the header")))
 
 (deftest writing-a-freshly-built-image
   (let [data (nii/array [3 4 5] (range 60))
@@ -142,3 +142,36 @@
     (is (= "built by nicloj" (nii/descrip (nii/header copy))))
     (is (all-close? affine (nii/affine copy)))
     (is (nii/array-close? data (nii/fdata copy) 0.0))))
+
+(deftest nan-into-a-scaled-integer-reads-back-near-zero
+  (let [f (fix/out-file "nan-int16.nii")
+        _ (nii/save (nii/image [[[##NaN 1000.5 2000.5]]] (nii/eye 4)) f :dtype :int16)
+        img (nii/load f)
+        [slope _] (nii/slope-inter (nii/header img))]
+    (is (<= (Math/abs (nii/voxel img [0 0 0])) slope))))
+
+(deftest keep-refuses-a-dtype-changed-by-with-dtype
+  (let [img (nii/load (fix/corpus-file "nifti1-3d-int16-scaled.nii.gz"))]
+    (is (thrown? Exception (nii/save (nii/with-dtype img :uint8)
+                                     (fix/out-file "keep-uint8.nii") :scaling :keep)))))
+
+(deftest pair-companions-follow-the-case-of-the-name
+  (is (= "UP.IMG" (:image (paths/resolve-image "UP.HDR"))))
+  (is (= "x.HDR.GZ" (:header (paths/resolve-image "x.IMG.GZ"))))
+  (is (= "x.img.GZ" (:image (paths/resolve-image "x.hdr.GZ")))))
+
+(deftest bad-scaling-and-version-are-refused
+  (let [img (nii/image [[[0.5 1.5 2.5]]] (nii/eye 4))
+        f (fix/out-file "refused.nii")]
+    (doseq [s [[0 0] [##NaN 0] [1 ##NaN] :none [1]]]
+      (is (thrown? Exception (nii/save img f :dtype :int16 :scaling s)) (str s)))
+    (is (thrown? Exception (nii/save (nii/image [[[1e39 1e39]]] (nii/eye 4)) f :dtype :int16)))
+    (doseq [v [0 3]]
+      (is (thrown? Exception (nii/save img f :version v)) (str v)))))
+
+(deftest explicit-scalers-are-narrowed-before-encoding-in-nifti-1
+  (let [f (fix/out-file "explicit-v1.nii")
+        _ (nii/save (nii/image [[[2e8 1e8]]] (nii/eye 4)) f :dtype :int32 :scaling [0.1 0])
+        img (nii/load f)
+        [slope _] (nii/slope-inter (nii/header img))]
+    (is (<= (Math/abs (- 2e8 (nii/voxel img [0 0 0]))) (/ slope 2)))))

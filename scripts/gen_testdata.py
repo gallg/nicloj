@@ -9,8 +9,6 @@ Writes files into test-data/ plus test-data/manifest.edn, which the Clojure
 test suite reads to check nicloj against nibabel field by field.
 """
 
-from __future__ import annotations
-
 import gzip
 import hashlib
 import shutil
@@ -19,12 +17,16 @@ from pathlib import Path
 
 import nibabel as nib
 import numpy as np
+from nibabel.processing import resample_from_to, resample_to_output
 
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "test-data"
 NILEARN_DATA = Path(nib.__file__).parent.parent / "nilearn" / "datasets" / "data"
+# Real-world images copied from nilearn's bundled data, as (source, corpus name).
+NILEARN_FIXTURES = [("mni_icbm152_t1_tal_nlin_sym_09a_converted.nii.gz", "mni152-t1.nii.gz"),
+                    ("image_10426.nii.gz", "nilearn-image-10426.nii.gz")]
 
-# Sampled voxel positions are taken on this stride so the manifest stays small.
+# Voxels sampled per image, so the manifest stays small.
 SAMPLE_COUNT = 24
 
 
@@ -126,11 +128,11 @@ def geometry(img, path):
         kw("shape"): list(img.shape),
         kw("dtype"): kw(np.dtype(hdr.get_data_dtype()).name),
         kw("zooms"): [float(z) for z in hdr.get_zooms()],
-        kw("affine"): [[float(v) for v in row] for row in img.affine],
+        kw("affine"): matrix(img.affine),
         kw("qform-code"): kw(hdr.get_value_label("qform_code")),
         kw("sform-code"): kw(hdr.get_value_label("sform_code")),
-        kw("qform"): [[float(v) for v in row] for row in hdr.get_qform()],
-        kw("sform"): [[float(v) for v in row] for row in hdr.get_sform()],
+        kw("qform"): matrix(hdr.get_qform()),
+        kw("sform"): matrix(hdr.get_sform()),
         kw("axcodes"): list(nib.aff2axcodes(img.affine)),
         **disk_fields(path),
         kw("xyzt-units"): [kw(xyz_unit), kw(t_unit)],
@@ -148,7 +150,7 @@ def geometry(img, path):
         ],
         kw("canonical"): {
             kw("shape"): list(canon.shape),
-            kw("affine"): [[float(v) for v in row] for row in canon.affine],
+            kw("affine"): matrix(canon.affine),
             kw("axcodes"): list(nib.aff2axcodes(canon.affine)),
             kw("stats"): stats(canon_data),
             kw("samples"): [
@@ -181,6 +183,10 @@ def ramp(shape, dtype, lo=0, hi=100):
     return np.ascontiguousarray(out.astype(dtype))
 
 
+def matrix(m):
+    return [[float(v) for v in row] for row in m]
+
+
 def oblique_affine():
     """A rotated, non-axis-aligned affine with a translation."""
     a, b = np.deg2rad(25), np.deg2rad(-12)
@@ -191,6 +197,14 @@ def oblique_affine():
 
 
 def build():
+    # Checked before anything is deleted: skipping these silently would leave
+    # a corpus that still passes, with a few hundred fewer assertions.
+    missing = [NILEARN_DATA / src for src, _ in NILEARN_FIXTURES
+               if not (NILEARN_DATA / src).exists()]
+    if missing:
+        raise SystemExit("nilearn's bundled images are missing, so the corpus would be "
+                         "incomplete:\n  " + "\n  ".join(str(m) for m in missing)
+                         + "\nInstall nilearn 0.14.1 in this venv, or update NILEARN_FIXTURES.")
     if OUT.exists():
         shutil.rmtree(OUT)
     OUT.mkdir(parents=True)
@@ -198,6 +212,7 @@ def build():
     plain = np.diag([2.0, 2.0, 2.5, 1.0])
     plain[:3, 3] = [-10.0, -20.0, -15.0]
     written = []
+    extra = {}
 
     def write(name, img):
         path = OUT / name
@@ -282,15 +297,73 @@ def build():
         nib.nifti1.Nifti1Extension(6, b"nicloj extension payload"))
     write("with-extension.nii", img)
 
-    # Real-world images shipped with nilearn.
-    for src, name in [("mni_icbm152_t1_tal_nlin_sym_09a_converted.nii.gz", "mni152-t1.nii.gz"),
-                      ("image_10426.nii.gz", "nilearn-image-10426.nii.gz")]:
-        path = NILEARN_DATA / src
-        if path.exists():
-            shutil.copy(path, OUT / name)
-            written.append(name)
+    # Resampled by nibabel.processing, for nicloj to reproduce. The result is
+    # stored in the dtype scipy produced, so the comparison is not quantised:
+    # float64 for scaled or float sources, the source's own type otherwise.
+    # A from-to target is recorded as the float64 affine nibabel used, since
+    # the stored sform is only float32.
+    def write_resampled(name, src, out, **how):
+        data = np.asanyarray(out.dataobj)
+        write(name, nib.Nifti1Image(data, out.affine))
+        extra[name] = {kw("resampled"): {kw("source"): src,
+                                         **{kw(k.replace("_", "-")): v for k, v in how.items()}}}
 
-    manifest = [{kw("file"): name, **geometry(nib.load(OUT / name), OUT / name)}
+    for order in (0, 1):
+        src = "oblique.nii.gz"
+        write_resampled(f"resampled-oblique-to-output-o{order}.nii.gz", src,
+                        resample_to_output(nib.load(OUT / src), order=order),
+                        how=kw("to-output"), order=order)
+    src = "nifti1-3d-int16-scaled.nii.gz"
+    write_resampled("resampled-scaled-to-output-o1.nii.gz", src,
+                    resample_to_output(nib.load(OUT / src), [3.0, 2.5, 3.5], order=1),
+                    how=kw("to-output"), voxel_sizes=[3.0, 2.5, 3.5], order=1)
+    src = "dtype-int16.nii"
+    write_resampled("resampled-int16-to-output-o1.nii.gz", src,
+                    resample_to_output(nib.load(OUT / src), 0.7, order=1),
+                    how=kw("to-output"), voxel_sizes=0.7, order=1)
+    # 4D onto a rotated, shifted grid partly outside the source, with a cval.
+    src = "nifti1-4d-float64.nii.gz"
+    img = nib.load(OUT / src)
+    turn = nib.affines.from_matvec(oblique_affine()[:3, :3] / 1.5, [1.5, -0.5, 0.5])
+    write_resampled("resampled-4d-from-to-o1.nii.gz", src,
+                    resample_from_to(img, ((4, 5, 3) + img.shape[3:], img.affine @ turn),
+                                     order=1, cval=-5.0),
+                    how=kw("from-to"), order=1, cval=-5.0, target=matrix(img.affine @ turn))
+
+    # Cut by nibabel's slicer, for nicloj's slice-image to reproduce. Specs are
+    # recorded the nicloj way: nil, an integer, or [start stop step].
+    def to_slice(spec):
+        if spec is None:
+            return slice(None)
+        if isinstance(spec, int):
+            return spec
+        return slice(*spec)
+
+    for name, src, specs in [
+            ("sliced-4d-volume.nii.gz", "nifti1-4d-float64.nii.gz", [None, None, None, 1]),
+            ("sliced-4d-crop-last.nii.gz", "nifti1-4d-float64.nii.gz", [[1, 3], None, None, -1]),
+            ("sliced-5d-two-axes.nii.gz", "nifti1-5d-float32.nii.gz", [None, None, None, 1, 0]),
+            ("sliced-5d-fourth-axis.nii.gz", "nifti1-5d-float32.nii.gz", [None, None, None, 1])]:
+        write(name, nib.load(OUT / src).slicer[tuple(to_slice(s) for s in specs)])
+        extra[name] = {kw("sliced"): {kw("source"): src, kw("specs"): specs}}
+
+    # Real-world images shipped with nilearn.
+    for src, name in NILEARN_FIXTURES:
+        shutil.copy(NILEARN_DATA / src, OUT / name)
+        written.append(name)
+    src = "mni152-t1.nii.gz"
+    img = nib.load(OUT / src)
+    # A rotated 4 mm grid centred on the template.
+    rot = oblique_affine()[:3, :3] / 1.5 * 4
+    shape = (30, 34, 28)
+    centre = nib.affines.apply_affine(img.affine, (np.array(img.shape) - 1) / 2)
+    target = nib.affines.from_matvec(rot, centre - rot @ ((np.array(shape) - 1) / 2))
+    write_resampled("resampled-mni152-from-to-o1.nii.gz", src,
+                    resample_from_to(img, (shape, target), order=1),
+                    how=kw("from-to"), order=1, target=matrix(target))
+
+    manifest = [{kw("file"): name, **geometry(nib.load(OUT / name), OUT / name),
+                 **extra.get(name, {})}
                 for name in written]
     (OUT / "manifest.edn").write_text(edn(manifest) + "\n")
     print(f"wrote {len(written)} images and manifest.edn into {OUT}")

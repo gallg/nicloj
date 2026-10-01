@@ -8,7 +8,8 @@
     nicloj.header-test
     nicloj.read-test
     nicloj.write-test
-    nicloj.ops-test])
+    nicloj.ops-test
+    nicloj.processing-test])
 
 (defn -main [& _]
   (apply require namespaces)

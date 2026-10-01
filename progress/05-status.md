@@ -6,14 +6,14 @@ pass in [07-log.md](07-log.md).
 ## Verified
 
 ```
-clojure -M:test                     83 tests, 3833 assertions, 0 failures, 0 errors
-python scripts/verify_roundtrip.py  116 files nicloj wrote, all match nibabel
+clojure -M:test                     116 tests, 5340 assertions, 0 failures, 0 errors
+python scripts/verify_roundtrip.py  156 files nicloj wrote, all match nibabel
 ```
 
 `clojure -M -e "(set! *warn-on-reflection* true) (require 'nicloj.api.image)"`
 is clean — no reflective call sites.
 
-The read direction matches nibabel 5.4.2 on every field of all 29 corpus
+The read direction matches nibabel 5.4.2 on every field of all 39 corpus
 images. The write direction produces files nibabel reads back with exactly
 equal voxels and matching header fields, in four layouts each.
 
@@ -79,9 +79,9 @@ Pinned by `large-64-bit-values-survive-a-round-trip` in `nicloj.array-test`.
 but decoding raises. `float128` and `complex256` have no Java equivalent and are
 not in the table at all.
 
-**No resampling.** Nothing in nicloj interpolates. `slice-image` crops and
-subsamples on the existing grid; there is no equivalent of
-`nibabel.processing.resample_from_to`.
+**Resampling is nearest or linear only.** `resample-from-to` and
+`resample-to-output` match nibabel exactly at `order` 0 and 1, but there are no
+cubic splines, nibabel's default, and no `smooth-image` or `conform`.
 
 **Auto-derived scalers are not bit-identical to nibabel's.** See
 [03-nibabel-parity.md](03-nibabel-parity.md). Values agree to within a
@@ -93,5 +93,7 @@ into the typed forms nibabel offers for AFNI and DICOM payloads.
 **No Freesurfer `dim` conventions.** Files using the `dim[1] == -1` large-vector
 hack or the ico7 surface shape read with their literal `dim`.
 
-**Reading is all-or-nothing.** Laziness controls *when* the voxel block is
-read, not how much; there is no partial or memory-mapped access.
+**Partial reads cover the last axis only.** `load-slab` reads a range of the
+last axis (volumes of a 4D image) without touching the rest; any other crop
+reads the whole block first. Gzipped files are still decompressed up to the
+slab. There is no memory-mapped access.

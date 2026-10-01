@@ -46,10 +46,11 @@ were nothing but stale classes in `target/classes`.
 
 ```
 nicloj/header/   Java   NiftiHeader, DataType, Extension, Codes, NiftiError
-nicloj/array/    Java   NdArray, Codec
+nicloj/array/    Java   NdArray, Store, Codec, Resample
 nicloj/affine/   Java   Mat, Svd, Quaternions, Affines, Orientations
 nicloj/io/       Clj    nicloj.io.paths, nicloj.io.stream
-nicloj/core/     Clj    header, ndarray, linalg, image, nifti, orientation, funcs
+nicloj/core/     Clj    header, ndarray, linalg, image, nifti, orientation, funcs,
+                        processing
 nicloj/api/      Clj    nicloj.api.image -- the public facade
 ```
 
@@ -82,6 +83,8 @@ The project root is the classpath root (`:paths ["." "target/classes"]`), so
   `apply-orientation` lives in `nicloj.core.orientation` for that reason.
 - **No reflection.** `clojure -M -e "(set! *warn-on-reflection* true) (require
   'nicloj.api.image)"` is clean; keep it that way.
+- **The version lives in `build.clj`** (`version`) and nowhere else; bump it
+  there with each release. nicloj is not published, just kept as a repo.
 - **Only `org.clojure/clojure` at runtime.** `tools.build` is build-time only,
   and the plain `javac` equivalent is documented so nothing depends on it.
 
@@ -93,12 +96,14 @@ Two directions, both must pass:
 ./dev/check.sh
 ```
 
-1. `scripts/gen_testdata.py` builds 29 fixtures with nibabel plus
-   `test-data/manifest.edn` recording what nibabel reports for each.
-2. `clojure -M:test` (83 tests, ~3830 assertions) asserts nicloj matches the
+1. `scripts/gen_testdata.py` builds 39 fixtures with nibabel plus
+   `test-data/manifest.edn` recording what nibabel reports for each. Two are
+   real images copied from nilearn; the generator stops if they are missing
+   rather than quietly building a smaller corpus.
+2. `clojure -M:test` (116 tests, ~5330 assertions) asserts nicloj matches the
    manifest field by field, and rewrites every fixture into
    `test-data/out/`.
-3. `scripts/verify_roundtrip.py` has nibabel re-read all 116 outputs and compare
+3. `scripts/verify_roundtrip.py` has nibabel re-read all 156 outputs and compare
    them to their originals — voxels at `atol=0`, plus 25 header fields.
 
 When adding a feature, add its fixture to the generator and its expectation to
@@ -129,5 +134,6 @@ next, `07-log.md` for how it got here.
 
 Voxels now keep their on-disk type, which was the largest open item; the
 storage layer is `nicloj/array/Store.java` and the invariant above says what it
-guarantees. The largest remaining item is partial reads, item 1 in
-`06-todo.md`.
+guarantees. Partial reads along the last axis are `load-slab`, and
+`nicloj.core.processing` resamples (nearest and linear; splines are not
+planned). What is left is listed in `06-todo.md`.

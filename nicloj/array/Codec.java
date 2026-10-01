@@ -66,7 +66,7 @@ public final class Codec {
                 throw new NiftiError("no decoder for " + type.label());
         }
         // Scaling produces real-world values, which are doubles by definition.
-        return NdArray.wrap(shape, out).scaled(slope, inter);
+        return new NdArray(shape, out).scaled(slope, inter);
     }
 
     /**
@@ -95,9 +95,11 @@ public final class Codec {
         } else if (type.isInteger()) {
             double lo = type.minValue();
             double hi = type.maxValue();
+            // NaN is written as whatever raw value reads back as 0, like nibabel's nan2zero.
+            double nanRaw = Math.min(hi, Math.max(lo, Math.rint(unscale ? -inter / slope : 0.0)));
             for (int i = 0; i < n; i++) {
                 double v = unscale ? (src.get(i) - inter) / slope : src.get(i);
-                v = Double.isNaN(v) ? 0.0 : Math.min(hi, Math.max(lo, Math.rint(v)));
+                v = Double.isNaN(v) ? nanRaw : Math.min(hi, Math.max(lo, Math.rint(v)));
                 putInt(b, type, v);
             }
         } else {

@@ -26,9 +26,15 @@
   (let [shape (nested-shape nested)
         a (NdArray. (int-array shape))]
     (letfn [(walk [x idx]
-              (if (sequential? x)
-                (doseq [[i child] (map-indexed vector x)] (walk child (conj idx i)))
-                (.set a (double x) (int-array idx))))]
+              (let [depth (count idx)]
+                (cond
+                  (and (sequential? x) (< depth (count shape)) (= (count x) (nth shape depth)))
+                  (doseq [[i child] (map-indexed vector x)] (walk child (conj idx i)))
+                  (and (number? x) (= depth (count shape)))
+                  (.set a (double x) (int-array idx))
+                  :else (throw (IllegalArgumentException.
+                                (str "nested data must be numbers in equal-length rows; bad entry at "
+                                     idx " for shape " shape))))))]
       (walk nested [])
       a)))
 
@@ -40,7 +46,8 @@
 
 (defn dtype
   "The voxel type the elements are held in, as a keyword."
-  [^NdArray a] (keyword (.label (.dtype a))))
+  [^NdArray a]
+  (keyword (.label (.dtype a))))
 
 (defn shape [^NdArray a] (vec (.shape a)))
 (defn ndim [^NdArray a] (.ndim a))
@@ -49,6 +56,8 @@
 (defn value
   "The voxel at `idx`, a sequence of per-axis indices."
   ^double [^NdArray a idx]
+  (when-not (every? integer? idx)
+    (throw (IllegalArgumentException. (str "indices must be integers, got " idx))))
   (.get a (int-array idx)))
 
 (deftype ArrayView [^NdArray array ^String header ^clojure.lang.Delay d]
@@ -56,9 +65,11 @@
   clojure.lang.IPersistentCollection
   (seq [_] (seq @d))
   (count [_] (count @d))
-  (cons [_ x] (cons x @d))
+  (cons [_ x] (conj @d x))
   (empty [_] [])
   (equiv [_ o] (= @d o))
+  clojure.lang.IHashEq
+  (hasheq [_] (hash @d))
   clojure.lang.Indexed
   (nth [_ i] (nth @d i))
   (nth [_ i not-found] (nth @d i not-found))
@@ -70,6 +81,8 @@
   Iterable
   (iterator [_] (clojure.lang.RT/iter @d))
   Object
+  (hashCode [_] (.hashCode ^Object @d))
+  (equals [_ o] (.equals ^Object @d o))
   (toString [_] (str header "\n" (.layout array))))
 
 (defmethod print-method ArrayView [v ^java.io.Writer w]
@@ -86,16 +99,19 @@
                (delay (vec (.toDoubleArray a)))))
 
 (defn nested
-  "Elements as row-major nested vectors, realised on first use."
+  "Elements as row-major nested vectors, realised on first use. A 0-d array
+  gives its one element, as numpy's `tolist` does."
   [^NdArray a]
-  (->ArrayView a (str "#nicloj/nested" (shape a))
-               (delay
-                (let [shape (shape a)]
-                  (letfn [(walk [idx depth]
-                            (if (= depth (count shape))
-                              (.get a (int-array idx))
-                              (mapv #(walk (conj idx %) (inc depth)) (range (nth shape depth)))))]
-                    (walk [] 0))))))
+  (if (zero? (.ndim a))
+    (.get a (int-array 0))
+    (->ArrayView a (str "#nicloj/nested" (shape a))
+                 (delay
+                   (let [shape (shape a)]
+                     (letfn [(walk [idx depth]
+                               (if (= depth (count shape))
+                                 (.get a (int-array idx))
+                                 (mapv #(walk (conj idx %) (inc depth)) (range (nth shape depth)))))]
+                       (walk [] 0)))))))
 
 (defn reshape ^NdArray [^NdArray a shape] (.reshape a (int-array shape)))
 (defn squeeze ^NdArray [^NdArray a] (.squeeze a))
@@ -107,11 +123,13 @@
   `nil` in place of a triple keeps the whole axis."
   ^NdArray [^NdArray a specs]
   (let [dims (shape a)
-        specs (map-indexed (fn [i s] (or s [0 (nth dims i) 1])) specs)]
+        specs (map-indexed (fn [i [start stop step]]
+                             [(or start 0) (or stop (nth dims i)) (or step 1)])
+                           specs)]
     (.slice a
             (int-array (map first specs))
             (int-array (map second specs))
-            (int-array (map #(nth % 2 1) specs)))))
+            (int-array (map last specs)))))
 
 (defn concat
   "Join arrays end to end along `axis`."

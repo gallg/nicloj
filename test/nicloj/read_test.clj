@@ -88,16 +88,18 @@
 (deftest voxels-are-read-lazily
   (let [img (nii/load (fix/corpus-file "nifti1-3d-float32.nii"))]
     (is (not (nii/loaded? img)) "no voxels read yet")
-    (is (= [7 8 9] (nii/shape img)) "shape comes from the header alone")
+    (is (= (:shape (fix/entry "nifti1-3d-float32.nii")) (nii/shape img))
+        "shape comes from the header alone")
     (is (some? (nii/fdata img)))
     (is (nii/loaded? img) "voxels cached once read"))
   (is (nii/loaded? (nii/load (fix/corpus-file "nifti1-3d-float32.nii") :eager? true))))
 
 (deftest reads-header-alone
-  (let [h (nii/read-header (fix/corpus-file "nifti2-3d-float32.nii"))]
-    (is (= 2 (nii/version h)))
-    (is (= [6 6 6] (hdr/shape h)))
-    (is (= :float32 (hdr/data-dtype h)))))
+  (let [h (nii/read-header (fix/corpus-file "nifti2-3d-float32.nii"))
+        want (fix/entry "nifti2-3d-float32.nii")]
+    (is (= (:version want) (nii/version h)))
+    (is (= (:shape want) (hdr/shape h)))
+    (is (= (:dtype want) (hdr/data-dtype h)))))
 
 (deftest either-half-of-a-pair-resolves
   (let [from-hdr (nii/load (fix/corpus-file "nifti1-pair.hdr"))
@@ -105,7 +107,7 @@
     (is (= (nii/shape from-hdr) (nii/shape from-img)))
     (is (nii/array-close? (nii/fdata from-hdr) (nii/fdata from-img))))
   (let [gz (nii/load (fix/corpus-file "nifti1-pair-gz.img.gz"))]
-    (is (= [4 5 6] (nii/shape gz)))))
+    (is (= (:shape (fix/entry "nifti1-pair-gz.hdr.gz")) (nii/shape gz)))))
 
 (deftest pair-halves-may-disagree-about-gzip
   (let [img (nii/load (fix/corpus-file "nifti1-pair.hdr"))]
@@ -128,3 +130,53 @@
     (let [path (fix/out-file "garbage.nii")]
       (spit path (apply str (repeat 400 "x")))
       (is (thrown? nicloj.header.NiftiError (nii/load path))))))
+
+(deftest load-slab-matches-slicing-the-full-image
+  (doseq [{:keys [file]} @fix/manifest]
+    (testing file
+      (let [path (fix/corpus-file file)
+            img (nii/load path)
+            shape (nii/shape img)
+            axis (dec (count shape))
+            n (nth shape axis)
+            [start stop] [(quot n 3) (- n (quot n 3))]
+            slab (nii/load-slab path start stop)
+            spec (assoc (vec (repeat (count shape) nil)) axis [start stop 1])]
+        (is (= (nii/array-dtype (nii/raw-data img)) (nii/array-dtype (nii/raw-data slab))))
+        (is (nii/array-close? (nii/slice (nii/raw-data img) spec) (nii/raw-data slab) 0.0))
+        (is (= (nii/slope-inter (nii/header img)) (nii/slope-inter (nii/header slab))))
+        (is (= (nii/qform-code (nii/header img)) (nii/qform-code (nii/header slab))))
+        (testing "voxels keep their world positions"
+          (let [origin [0 0 0]]
+            (is (all-close? (nii/voxel->world img (if (< axis 3) (assoc origin axis start) origin))
+                            (nii/voxel->world slab origin)
+                            1e-6))))))))
+
+(deftest load-slab-rejects-a-bad-range
+  (let [path (fix/corpus-file "nifti1-4d-float64.nii.gz")
+        n (peek (hdr/shape (nii/read-header path)))]
+    (is (thrown? Exception (nii/load-slab path 0 (inc n))))
+    (is (thrown? Exception (nii/load-slab path 2 1)))
+    (is (thrown? Exception (nii/load-slab path 0.0 1.5)))))
+
+(deftest a-vox-offset-past-the-end-does-not-allocate-it
+  (let [h (hdr/copy (hdr/set-shape (hdr/new-header) [2 2 2]))
+        f (fix/out-file "voxoff-huge.nii")]
+    (set! (.voxOffset h) (long 1.6e9))
+    (with-open [o (io/output-stream f)] (.write o (hdr/to-bytes h)) (.write o (byte-array 64)))
+    (is (= 1600000000 (nii/data-offset (nii/read-header f))))
+    (is (thrown? Exception (nii/fdata (nii/load f))))))
+
+(deftest a-low-vox-offset-reads-after-the-extender
+  (let [img (nii/image [[[1.5 2.5 3.5]]] (nii/eye 4))
+        buf (nii/->bytes img)]
+    ;; vox_offset is a float32 at byte 108 of a NIfTI-1 header; 200 is below
+    ;; the 352 minimum
+    (.putFloat (doto (java.nio.ByteBuffer/wrap buf) (.order java.nio.ByteOrder/LITTLE_ENDIAN)) 108 200.0)
+    (is (= (nii/values (nii/fdata img)) (nii/values (nii/fdata (nii/from-bytes buf)))))))
+
+(deftest truncated-files-raise-nifti-errors
+  (let [whole (nii/->bytes (nii/image [[[1 2 3 4]]] (nii/eye 4)))
+        f (fix/out-file "truncated.nii")]
+    (with-open [o (io/output-stream f)] (.write o whole 0 (- (alength whole) 6)))
+    (is (thrown? nicloj.header.NiftiError (nii/fdata (nii/load f))))))

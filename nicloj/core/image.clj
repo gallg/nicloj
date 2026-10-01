@@ -11,8 +11,7 @@
 
 (defrecord NiftiImage [^NiftiHeader header affine data])
 
-(defn image?
-  [x] (instance? NiftiImage x))
+(defn image? [x] (instance? NiftiImage x))
 
 ;; ------------------------------------------------------------------ accessors
 

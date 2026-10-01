@@ -1,5 +1,6 @@
 package nicloj.header;
 
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -64,6 +65,6 @@ public final class Codes {
     private static Map<Integer, String> table(Object... kvs) {
         Map<Integer, String> m = new LinkedHashMap<>();
         for (int i = 0; i < kvs.length; i += 2) m.put((Integer) kvs[i], (String) kvs[i + 1]);
-        return java.util.Collections.unmodifiableMap(m);
+        return Collections.unmodifiableMap(m);
     }
 }

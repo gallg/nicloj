@@ -56,7 +56,8 @@
              [[1.0 2.0 3.0] [4.0 5.0 6.0] [7.0 8.0 9.0]]]]
     (let [svd (Svd/of (la/arr m))
           s (vec (.s svd))
-          reconstructed (la/mmul (la/mmul (la/rows (.u svd)) (la/rows (Mat/diag (double-array s))))
+          diag (mapv (fn [i] (assoc (vec (repeat (count s) 0.0)) i (s i))) (range (count s)))
+          reconstructed (la/mmul (la/mmul (la/rows (.u svd)) diag)
                                  (la/rows (Mat/transpose (.v svd))))]
       (is (all-close? m reconstructed 1e-10) "u * diag(s) * v^T")
       (is (= s (vec (sort > s))) "singular values are descending"))))
@@ -134,9 +135,10 @@
         ras (ornt/axcodes->ornt ["R" "A" "S"])]
     (is (= ras (ornt/ornt-transform ras ras)))
     (testing "transforming then applying gives the target codes"
-      (let [t (ornt/ornt-transform lia ras)]
-        (is (= 3 (count t)))
-        (is (every? #(#{1 -1} (second %)) t))))))
+      (let [lia-affine [[-1 0 0 0] [0 0 1 0] [0 -1 0 0] [0 0 0 1]]
+            t (ornt/ornt-transform lia ras)]
+        (is (= ["L" "I" "A"] (ornt/axcodes lia-affine)))
+        (is (= ["R" "A" "S"] (ornt/axcodes (la/mmul lia-affine (ornt/inv-ornt-aff t [4 5 6])))))))))
 
 (deftest inv-ornt-aff-inverts-flips
   (let [shape [4 5 6]
@@ -160,3 +162,18 @@
     (testing "extra axes are carried along"
       (let [arr4 (nd/reshape arr [2 3 2 2])]
         (is (= [3 2 2 2] (nd/shape (ornt/apply-orientation arr4 [[1 1] [0 1] [2 1]]))))))))
+
+(deftest points-must-match-the-affine
+  (is (thrown? NiftiError (la/apply-affine diag-affine [1 1 1 5])))
+  (is (thrown? NiftiError (la/apply-affine diag-affine [1 1]))))
+
+(deftest orientations-may-hold-doubles
+  (let [a (nd/array [2 2] [1 3 2 4])]
+    (is (= (nd/values (ornt/apply-orientation a [[0 -1] [1 1]]))
+           (nd/values (ornt/apply-orientation a [[0 -1.0] [1.0 1.0]]))))))
+
+(deftest non-finite-affines-and-oversized-orientations-are-refused
+  (let [bad (assoc-in diag-affine [0 0] ##NaN)]
+    (is (thrown? NiftiError (ornt/io-orientation bad)))
+    (is (thrown? NiftiError (Affines/toQform (la/arr bad)))))
+  (is (thrown? NiftiError (ornt/apply-orientation (nd/array [2 2] [1 2 3 4]) [[1 1] [0 1] [2 1]]))))

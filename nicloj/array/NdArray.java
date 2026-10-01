@@ -1,12 +1,13 @@
 package nicloj.array;
 
 import java.util.Arrays;
-import nicloj.header.DataType;
 import java.util.Locale;
+import nicloj.header.DataType;
 
 /**
- * A dense n-dimensional array of doubles in column-major order, matching the
- * NIfTI on-disk layout where the first axis varies fastest.
+ * A dense n-dimensional array in column-major order, matching the NIfTI
+ * on-disk layout where the first axis varies fastest. Elements are stored in
+ * a {@link Store} of their voxel type and read and written as doubles.
  *
  * <p>Instances are treated as immutable by the rest of nicloj; the mutating
  * setters exist for building arrays before handing them off.
@@ -35,17 +36,9 @@ public final class NdArray {
         this.strides = columnMajorStrides(this.shape);
     }
 
-    /** Wrap {@code data} without copying; caller must not mutate it afterwards. */
-    public static NdArray wrap(int[] shape, double[] data) { return new NdArray(shape, data); }
-
-    /** Wrap a store without copying; caller must not mutate it afterwards. */
-    public static NdArray wrap(int[] shape, Store data) { return new NdArray(shape, data); }
-
-
     public int[] shape() { return shape.clone(); }
     public int ndim() { return shape.length; }
     public int size() { return data.size(); }
-    public int dim(int axis) { return shape[axis]; }
 
     /** The backing store, in column-major order. Not copied. */
     public Store store() { return data; }
@@ -83,7 +76,6 @@ public final class NdArray {
         return off;
     }
 
-
     // -------------------------------------------------------------- reshaping
 
     /** Reinterpret the same buffer under a new shape of equal total size. */
@@ -110,6 +102,13 @@ public final class NdArray {
         if (perm.length != shape.length) {
             throw new IllegalArgumentException("permutation length must equal ndim");
         }
+        boolean[] seen = new boolean[perm.length];
+        for (int p : perm) {
+            if (p < 0 || p >= perm.length || seen[p]) {
+                throw new IllegalArgumentException("not a permutation of the axes: " + Arrays.toString(perm));
+            }
+            seen[p] = true;
+        }
         int[] outShape = new int[perm.length];
         for (int i = 0; i < perm.length; i++) outShape[i] = shape[perm[i]];
         Store out = data.alloc(data.size());
@@ -128,6 +127,7 @@ public final class NdArray {
 
     /** Reverse the order of elements along {@code axis}. */
     public NdArray flip(int axis) {
+        checkAxis(axis, shape.length);
         Store out = data.alloc(data.size());
         int n = shape[axis];
         int stride = strides[axis];
@@ -171,6 +171,7 @@ public final class NdArray {
     public static NdArray concat(NdArray[] parts, int axis) {
         if (parts.length == 0) throw new IllegalArgumentException("nothing to concatenate");
         int nd = parts[0].ndim();
+        checkAxis(axis, nd);
         int total = 0;
         for (NdArray p : parts) {
             if (p.ndim() != nd) throw new IllegalArgumentException("mismatched ndim");
@@ -252,12 +253,18 @@ public final class NdArray {
         return new NdArray(shape, out);
     }
 
+    private static void checkAxis(int axis, int ndim) {
+        if (axis < 0 || axis >= ndim) {
+            throw new IllegalArgumentException("axis " + axis + " out of range for " + ndim + "-d array");
+        }
+    }
+
     public boolean closeTo(NdArray other, double atol) {
         if (!Arrays.equals(shape, other.shape)) return false;
         for (int i = 0; i < data.size(); i++) {
             double a = data.get(i);
             double b = other.data.get(i);
-            if (Double.isNaN(a) && Double.isNaN(b)) continue;
+            if (a == b || (Double.isNaN(a) && Double.isNaN(b))) continue;
             if (!(Math.abs(a - b) <= atol)) return false;
         }
         return true;

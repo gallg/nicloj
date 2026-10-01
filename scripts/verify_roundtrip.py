@@ -21,7 +21,8 @@ CORPUS = ROOT / "test-data"
 OUT = CORPUS / "out"
 
 # Fields a faithful rewrite has to preserve. vox_offset, scl_slope, scl_inter
-# and magic legitimately change with the layout, so they are checked separately.
+# and magic legitimately change with the layout, so they are left out: the
+# voxel comparison covers the scaling, and magic is checked against the variant.
 HEADER_FIELDS = [
     "dim", "datatype", "bitpix", "qform_code", "sform_code",
     "quatern_b", "quatern_c", "quatern_d", "qoffset_x", "qoffset_y", "qoffset_z",
@@ -72,10 +73,6 @@ def compare(source: Path, written: Path, variant: str, problems: list[str]):
         bad(f"voxels differ, largest gap {worst}")
 
     for field in HEADER_FIELDS:
-        if field not in original.header.structarr.dtype.names:
-            continue
-        if field not in copy.header.structarr.dtype.names:
-            continue
         a, b = original.header[field], copy.header[field]
         if not np.array_equal(np.asarray(a).astype(np.float64) if a.dtype.kind == "f" else a,
                               np.asarray(b).astype(np.float64) if b.dtype.kind == "f" else b):

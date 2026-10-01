@@ -9,7 +9,8 @@
             [nicloj.core.image :as img]
             [nicloj.core.linalg :as la]
             [nicloj.core.ndarray :as nd])
-  (:import (nicloj.affine Orientations)))
+  (:import (nicloj.affine Orientations)
+           (nicloj.header NiftiError)))
 
 (def canonical
   "The orientation of RAS-ordered data: no transpose, no flips."
@@ -64,8 +65,11 @@
   "Flip and transpose a voxel array according to `ornt`."
   [arr ornt]
   (let [a (nd/coerce arr)
+        _ (when (> (count ornt) (nd/ndim a))
+            (throw (NiftiError. (str "orientation has " (count ornt) " axes but the data only "
+                                     (nd/ndim a)))))
         flipped (reduce (fn [acc [axis [_ flip]]]
-                          (if (= -1 flip) (nd/flip acc axis) acc))
+                          (if (== -1 flip) (nd/flip acc axis) acc))
                         a
                         (map-indexed vector ornt))
         perm (vec (Orientations/axisPermutation (->arr ornt)))]
@@ -79,7 +83,7 @@
     img
     (let [data (apply-orientation (img/fdata img) ornt)
           affine (la/mmul (img/affine img) (inv-ornt-aff ornt (img/shape img)))
-          remap (fn [axis] (when axis (first (nth ornt axis))))
+          remap (fn [axis] (when axis (long (first (nth ornt axis)))))
           [freq phase slice] (hdr/dim-info (img/header img))
           h (hdr/set-dim-info (img/header img) (remap freq) (remap phase) (remap slice))]
       (img/image data affine :header h))))
