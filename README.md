@@ -3,9 +3,9 @@
 NIfTI-1 and NIfTI-2 reading and writing in Clojure and Java, written from
 scratch and tested against [nibabel](https://nipy.org/nibabel/).
 
-Handles `.nii`, `.nii.gz` and `.hdr`/`.img` pairs, either byte order, all real
-integer and float datatypes, qform/sform affines, orientations and header
-extensions.
+Handles `.nii`, `.nii.gz` and NIfTI `.hdr`/`.img` pairs (not the older Analyze
+7.5 format), either byte order, every integer datatype plus `float32` and
+`float64`, qform/sform affines, orientations and header extensions.
 
 ## Use
 
@@ -38,8 +38,7 @@ Needs `clojure` and `javac` on `PATH`. Compile the Java modules once:
 clojure -T:build javac
 ```
 
-`./dev/check.sh` does that, builds a test corpus with nibabel, runs the Clojure
-suite against it, then has nibabel re-read everything nicloj wrote. It needs a
+To test the implementation against nibabel, run `./dev/check.sh`. It needs a
 Python environment with nibabel and nilearn.
 
 ## Layout
